@@ -6,6 +6,9 @@
 * @license http://kodcloud.com/tools/license/license.txt
 */
 
+if(!isset($config['appStartTime'])){
+	$config['appStartTime'] = mtime();
+}
 
 function myAutoloader($name) {
 	$find = array(
@@ -14,6 +17,7 @@ function myAutoloader($name) {
 		SDK_DIR.$name.'.class.php',
 		CORER_DIR.'/Driver/Cache/'.$name.'.class.php',
 		CORER_DIR.'/Driver/DB/'.$name.'.class.php',
+		CORER_DIR.'/IO/'.$name.'.class.php',
 
 		MODEL_DIR.$name.'.class.php',
 		CONTROLLER_DIR.$name.'.class.php',
@@ -84,6 +88,26 @@ function strip($str){
 	return preg_replace('!\s+!', '', $str);
 } 
 
+// 删除字符串两端的字符串
+function str_trim($str,$remove){
+	return str_rtrim(str_ltrim($str,$remove),$remove);
+}
+function str_ltrim($str,$remove){
+	if(!$str || !$remove) return $str;
+	while(substr($str,0,strlen($remove)) == $remove){
+		$str = substr($str,strlen($remove));
+	}
+	return $str;
+}
+function str_rtrim($str,$remove){
+	if(!$str || !$remove) return $str;
+	while(substr($str,-strlen($remove)) == $remove){
+		$str = substr($str,0,-strlen($remove));
+		echo $str;
+	}
+	return $str;
+}
+
 /**
  * 获取精确时间
  */
@@ -94,15 +118,21 @@ function mtime(){
 }
 /**
  * 过滤HTML
+ * 
+ * eg: </script><script>alert(1234)</script>
+ * 允许url中字符;
  */
-function clear_html($HTML, $br = true){
-	$HTML = htmlspecialchars(trim($HTML));
-	$HTML = str_replace("\t", ' ', $HTML);
-	if ($br) {
-		return nl2br($HTML);
-	} else {
-		return str_replace("\n", '', $HTML);
-	} 
+function clear_html($html, $br = true){
+	$html = $html === null ? "" : $html;
+	$replace = array('<','>','"',"'");
+	$replaceTo = array('&lt;','&gt;','&quot;','&#39;');
+	return str_replace($replace,$replaceTo,$html);
+}
+function clear_quote($html){
+	$html = $html === null ? "" : $html;
+	$replace = array('"',"'",'</script');
+	$replaceTo = array('\\"',"\\'","<\/script");	
+	return str_ireplace($replace,$replaceTo,$html);
 }
 
 /**
@@ -120,7 +150,7 @@ function filter_html($html){
 
 
 function in_array_not_case($needle, $haystack) {
-    return in_array(strtolower($needle),array_map('strtolower',$haystack));
+	return in_array(strtolower($needle),array_map('strtolower',$haystack));
 }
 
 /**
@@ -145,8 +175,9 @@ function obj2array($obj){
 
 function ignore_timeout(){
 	@ignore_user_abort(true);
-	@set_time_limit(24 * 60 * 60);//set_time_limit(0)  1day
-	@ini_set('memory_limit', '2028M');//2G;
+	@ini_set("max_execution_time",48 * 60 * 60);
+	@set_time_limit(48 * 60 * 60);//set_time_limit(0)  2day
+	@ini_set('memory_limit', '4000M');//4G;
 }
 
 
@@ -244,6 +275,11 @@ if (!function_exists('gzdecode')) {
 	}
 }
 
+function xml2json($decodeXml){
+	$data = simplexml_load_string($decodeXml,'SimpleXMLElement', LIBXML_NOCDATA);
+	return json_decode(json_encode($data),true);
+}
+
 /**
  * 二维数组按照指定的键值进行排序，
  * 
@@ -257,18 +293,40 @@ if (!function_exists('gzdecode')) {
  * $out = array_sort_by($array,'price');
  */
 function array_sort_by($records, $field, $reverse=false){
-    $hash = array();
-    foreach($records as $record){
-        $hash[$record[$field]] = $record;
+	$reverse = $reverse?SORT_DESC:SORT_ASC;
+	array_multisort(array_column($records,$field),$reverse,$records);
+	return $records;
+}
+
+if (!function_exists('array_column')) {
+    function array_column($array, $column_key, $index_key = null) {
+        $column_key_isNumber = (is_numeric($column_key)) ? true : false;
+        $index_key_isNumber  = (is_numeric($index_key)) ? true : false;
+        $index_key_isNull    = (is_null($index_key)) ? true : false;
+         
+        $result = array();
+        foreach((array)$array as $key=>$val){
+            if($column_key_isNumber){
+                $tmp = array_slice($val, $column_key, 1);
+                $tmp = (is_array($tmp) && !empty($tmp)) ? current($tmp) : null;
+            } else {
+                $tmp = isset($val[$column_key]) ? $val[$column_key] : null;
+            }
+            if(!$index_key_isNull){
+                if($index_key_isNumber){
+                    $key = array_slice($val, $index_key, 1);
+                    $key = (is_array($key) && !empty($key)) ? current($key) : null;
+                    $key = is_null($key) ? 0 : $key;
+                }else{
+                    $key = isset($val[$index_key]) ? $val[$index_key] : 0;
+                }
+            }
+            $result[$key] = $tmp;
+        }
+        return $result;
     }
-    ($reverse)? krsort($hash) : ksort($hash);
-    
-    $records = array();
-    foreach($hash as $record){
-        $records []= $record;
-    }
-    return $records;
-} 
+}
+
 /**
  * 遍历数组，对每个元素调用 $callback，假如返回值不为假值，则直接返回该返回值；
  * 假如每次 $callback 都返回假值，最终返回 false
@@ -296,24 +354,6 @@ function array_try($array, $callback){
 		} 
 	} 
 	return false;
-} 
-// 求多个数组的并集
-function array_union(){
-	$argsCount = func_num_args();
-	if ($argsCount < 2) {
-		return false;
-	} else if (2 === $argsCount) {
-		list($arr1, $arr2) = func_get_args();
-
-		while ((list($k, $v) = each($arr2))) {
-			if (!in_array($v, $arr1)) $arr1[] = $v;
-		} 
-		return $arr1;
-	} else { // 三个以上的数组合并
-		$arg_list = func_get_args();
-		$all = call_user_func_array('array_union', $arg_list);
-		return array_union($arg_list[0], $all);
-	} 
 }
 // 取出数组中第n项
 function array_get_index($arr,$index){
@@ -321,6 +361,43 @@ function array_get_index($arr,$index){
 	   $index--;
 	   if($index<0) return array($k,$v);
    }
+}
+
+function array_field_values($arr,$field){
+   $result = array();
+	foreach ($arr as $val) {
+		if(is_array($val) && isset($val[$field])){
+			$result[] = $val[$field];
+		}		
+	}
+	return $result;
+}
+
+// 删除数组某个值
+function array_remove_value($array, $value){
+	$isNumericArray = true;
+	foreach ($array as $key => $item) {
+		if ($item === $value) {
+			if (!is_int($key)) {
+				$isNumericArray = false;
+			}
+			unset($array[$key]);
+		}
+	}
+	if ($isNumericArray) {
+		$array = array_values($array);
+	}
+	return $array;
+}
+
+// 获取数组key最大的值
+function array_key_max($array){
+	if(count($array)==0){
+		return 1;
+	}
+	$idArr = array_keys($array);
+	rsort($idArr,SORT_NUMERIC);//id从高到底
+	return intval($idArr[0]);
 }
 
 //set_error_handler('errorHandler',E_ERROR|E_PARSE|E_CORE_ERROR|E_COMPILE_ERROR|E_USER_ERROR);
@@ -356,27 +433,35 @@ function fatalErrorHandler(){
 	}
 }
 
-function show_tips($message,$url= '', $time = 3,$title = ''){
-	ob_get_clean();
+function show_tips($message,$url= '', $time = 3,$title = '',$exit = true){
+	ob_get_clean();$time=500;
 	header('Content-Type: text/html; charset=utf-8');
 	$goto = "content='$time;url=$url'";
-	$info = "Auto jump after {$time}s, <a href='$url'>Click Here</a>";
+	$info = "{$time}s 后自动跳转, <a href='$url'>立即跳转</a>";
 	if ($url == "") {
 		$goto = "";
 		$info = "";
 	} //是否自动跳转
 
 	if($title == ''){
-		$title = "警告 (Warning!)";
+		$title = "出错了！";
+	}
+	//移动端；报错输出
+	if(isset($_REQUEST['HTTP_X_PLATFORM'])){
+		show_json($message,false);
 	}
 	
 	if(is_array($message) || is_object($message)){
 		$message = json_encode_force($message);
-		$message = nl2br(htmlspecialchars($message));
+		$message = htmlspecialchars($message);
 		$message = "<pre>".$message.'</pre>';
 	}else{
 		$message = filter_html(nl2br($message));
-	}	
+	}
+	if(file_exists(TEMPLATE.'common/showTips.html')){
+		include(TEMPLATE.'common/showTips.html');
+		if($exit){exit;}
+	}
 	echo<<<END
 <html>
 	<meta http-equiv='refresh' $goto charset="utf-8">
@@ -400,7 +485,7 @@ function show_tips($message,$url= '', $time = 3,$title = ''){
 	</body>
 </html>
 END;
-	exit;
+	if($exit){exit;}
 }
 function get_caller_info() {
 	$trace = debug_backtrace();
@@ -502,6 +587,7 @@ function json_space_clear($str){
 }
 
 function json_decode_force($str){
+	$str = trim($str,'﻿');
 	$str = json_comment_clear($str);
 	$str = json_space_clear($str);
 
@@ -520,7 +606,9 @@ function json_encode_force($json){
 		$jsonStr = json_encode($json);
 	}
 	if($jsonStr === false){
-		$jsonStr = __json_encode($json);
+		include_once(dirname(__FILE__)."/others/JSON.php");
+		$parse = new Services_JSON();
+		$jsonStr =  $parse->encode($json);
 	}
 	return $jsonStr;
 }
@@ -531,6 +619,9 @@ function json_encode_force($json){
  * @params {array} 返回的数据集合
  */
 function show_json($data,$code = true,$info=''){
+	if($GLOBALS['SHOW_JSON_RETURN']){
+		return;
+	}
 	$useTime = mtime() - $GLOBALS['config']['appStartTime'];
 	$result = array('code'=>$code,'use_time'=>$useTime,'data'=>$data);
 	if(defined("GLOBAL_DEBUG") && GLOBAL_DEBUG==1){
@@ -540,38 +631,62 @@ function show_json($data,$code = true,$info=''){
 		$result['info'] = $info;
 	}
 	ob_end_clean();
-	header("X-Powered-By: kodExplorer.");
-	header('Content-Type: application/json; charset=utf-8');
-
+	if(!headers_sent()){
+		header("X-Powered-By: kodExplorer.");
+		header('Content-Type: application/json; charset=utf-8'); 
+	}
+	if(class_exists('Hook')){
+		$temp = Hook::trigger("show_json",$result);
+		if(is_array($temp)){
+			$result = $temp;
+		}
+	}
 	$json = json_encode_force($result);
 	if(isset($_GET['callback'])){
+		if(!preg_match("/^[0-9a-zA-Z_.]+$/",$_GET['callback'])){
+			die("calllback error!");
+		}
 		echo $_GET['callback'].'('.$json.');';
 	}else{
 		echo $json;
 	}
-	exit;
+	if(!isset($GLOBALS['SHOW_JSON_EXIT']) || !$GLOBALS['SHOW_JSON_EXIT']){
+		exit;
+	}
 }
 
 function show_trace(){
 	echo '<pre>';
-	var_dump(func_get_args());
+	var_dump(json_encode(func_get_args()));
 	echo '<hr/>';
-	echo get_caller_info();
+	print_r(get_caller_info());
 	echo '</pre>';
 	exit;
 }
 
-
-
+function file_sub_str($file,$start=0,$len=0){
+	$size = filesize($file);
+	if($start < 0 ){
+		$start = $size + $start;
+		$len = $size - $start;
+	}
+    $fp = fopen($file,'r');
+    fseek($fp,$start);
+    $res = fread($fp,$len);
+    fclose($fp);
+    return $res;
+}
 function str2hex($string){
 	$hex='';
-	for ($i=0; $i < strlen($string); $i++){
-		$hex .= dechex(ord($string[$i]));
+	for($i=0;$i<strlen($string);$i++){
+		$hex .= sprintf('%02s ',dechex(ord($string[$i])));
 	}
+	$hex = strtoupper($hex);
 	return $hex;
 }
 
 function hex2str($hex){
+	$hex = str_replace(" ",'',$hex);
 	$string='';
 	for ($i=0; $i < strlen($hex)-1; $i+=2){
 		$string .= chr(hexdec($hex[$i].$hex[$i+1]));
@@ -580,65 +695,19 @@ function hex2str($hex){
 }
 
 if(!function_exists('json_encode')){
+	include_once(dirname(__FILE__)."/others/JSON.php");
 	function json_encode($data){
-		__json_encode($data);
+		$json = new Services_JSON();
+		return $json->encode($data);
 	}
-}
-function __json_encode( $data ) {
-	if( is_array($data) || is_object($data) ) { 
-		$islist = is_array($data) && ( empty($data) || array_keys($data) === range(0,count($data)-1) ); 
-		if( $islist ) { 
-			$json = '[' . implode(',', array_map('__json_encode', $data) ) . ']'; 
-		} else { 
-			$items = Array(); 
-			foreach( $data as $key => $value ) { 
-				$items[] = __json_encode("$key") . ':' . __json_encode($value); 
-			}
-			$json = '{' . implode(',', $items) . '}'; 
-		} 
-	} else if( is_string($data) ) { 
-		$string = addcslashes($data, "\\\"\n\r\t/" . chr(8) . chr(12));
-		$json    = ''; 
-		$len    = strlen($string); 
-		# Convert UTF-8 to Hexadecimal Codepoints. 
-		for( $i = 0; $i < $len; $i++ ) { 
-			$char = $string[$i]; 
-			$c1 = ord($char); 
-			
-			# Single byte; 
-			if( $c1 <128 ) { 
-				$json .= ($c1 > 31) ? $char : sprintf("\\u%04x", $c1); 
-				continue; 
-			}
-			
-			# Double byte 
-			$c2 = ord($string[++$i]); 
-			if ( ($c1 & 32) === 0 ) { 
-				$json .= sprintf("\\u%04x", ($c1 - 192) * 64 + $c2 - 128); 
-				continue; 
-			}
-			
-			# Triple 
-			$c3 = ord($string[++$i]); 
-			if( ($c1 & 16) === 0 ) { 
-				$json .= sprintf("\\u%04x", (($c1 - 224) <<12) + (($c2 - 128) << 6) + ($c3 - 128)); 
-				continue; 
-			}
-				
-			# Quadruple 
-			$c4 = ord($string[++$i]); 
-			if( ($c1 & 8 ) === 0 ) { 
-				$u = (($c1 & 15) << 2) + (($c2>>4) & 3) - 1;
-				$w1 = (54<<10) + ($u<<6) + (($c2 & 15) << 2) + (($c3>>4) & 3); 
-				$w2 = (55<<10) + (($c3 & 15)<<6) + ($c4-128); 
-				$json .= sprintf("\\u%04x\\u%04x", $w1, $w2); 
-			}
-		} 
-		$json = '"'.addcslashes($data, "\"").'"';
-	} else { 
-		$json = strtolower(var_export( $data, true )); 
-	} 
-	return $json; 
+	function json_decode($json_data,$toarray =false) {
+		$json = new Services_JSON();
+		$array = $json->decode($json_data);
+		if ($toarray) {
+			$array = obj2array($array);
+		}
+		return $array;
+	}
 }
 
 /**
@@ -678,7 +747,7 @@ function html2txt($document){
 } 
 
 // 获取内容第一条
-function match($content, $preg){
+function match_text($content, $preg){
 	$preg = "/" . $preg . "/isU";
 	preg_match($preg, $content, $result);
 	return $result[1];
@@ -775,105 +844,68 @@ function msubstr($str, $start = 0, $length, $charset = "utf-8", $suffix = true){
 	$slice = join("", array_slice($match[0], $start, $length));
 	if ($suffix) return $slice . "…";
 	return $slice;
-} 
+}
 
-
-/**
- * 获取变量的名字
- * eg hello="123" 获取ss字符串
- */
-function get_var_name(&$aVar){
-	foreach($GLOBALS as $key => $var) {
-		if ($aVar == $GLOBALS[$key] && $key != "argc") {
-			return $key;
-		} 
-	} 
-} 
 // -----------------变量调试-------------------
 /**
  * 格式化输出变量，或者对象
  * 
- * @param mixed $var 
- * @param boolean $exit 
+ * @param args; 
+ * 默认自动退出；最后一个参数为false时不退出
  */
-function pr($var, $exit = false){
+
+function pr_replace_callback($matches){
+	return "\n".str_repeat(" ",strlen($matches[1])*2).$matches[2];
+}
+function pr(){
 	ob_start();
 	$style = '<style>
-	pre#debug{margin:10px;font-size:14px;color:#222;font-family:Consolas ;line-height:1.2em;background:#f6f6f6;border-left:5px solid #444;padding:5px;width:95%;word-break:break-all;}
+	pre#debug{margin:10px;font-size:14px;color:#222;font-family:Consolas ;line-height:1.2em;background:#f6f6f6;
+		border-left:5px solid #444;padding:10px;width:95%;word-break:break-all;white-space:pre-wrap;word-wrap: break-word;}
 	pre#debug b{font-weight:400;}
-	#debug #debug_str{color:#E75B22;}
-	#debug #debug_keywords{font-weight:800;color:00f;}
-	#debug #debug_tag1{color:#22f;}
-	#debug #debug_tag2{color:#f33;font-weight:800;}
-	#debug #debug_var{color:#33f;}
-	#debug #debug_var_str{color:#f00;}
+	#debug #debug_keywords{font-weight:200;color:#888;}
+	#debug #debug_tag{color:#222 !important;}
+	#debug #debug_var{color:#f60;}
+	#debug #debug_var_str,#debug #debug_var_str #debug_keywords{color:#f44336;}
 	#debug #debug_set{color:#0C9CAE;}</style>';
-	if (is_array($var)) {
-		print_r($var);
-	} else if (is_object($var)) {
-		echo get_class($var) . " Object";
-	} else if (is_resource($var)) {
-		echo (string)$var;
-	} else {
-		echo var_dump($var);
-	} 
-	$out = ob_get_clean(); //缓冲输出给$out 变量	
-	$out = preg_replace('/"(.*)"/', '<b id="debug_var_str">"' . '\\1' . '"</b>', $out); //高亮字符串变量
-	$out = preg_replace('/=\>(.*)/', '=>' . '<b id="debug_str">' . '\\1' . '</b>', $out); //高亮=>后面的值
-	$out = preg_replace('/\[(.*)\]/', '<b id="debug_tag1">[</b><b id="debug_var">' . '\\1' . '</b><b id="debug_tag1">]</b>', $out); //高亮变量
-	$from = array('    ', '(', ')', '=>');
-	$to = array('  ', '<b id="debug_tag2">(</i>', '<b id="debug_tag2">)</b>', '<b id="debug_set">=></b>');
-	$out = str_replace($from, $to, $out);
 
-	$keywords = array('Array', 'int', 'string', 'class', 'object', 'null'); //关键字高亮
+	ob_start();
+	$arg = func_get_args();
+	$num = func_num_args();
+	$exit = true;
+	for ($i=0; $i < $num; $i++) {
+		if($i == $num-1 && $arg[$i] == true){
+			$exit = false;
+		}
+		var_dump($arg[$i]);
+	}
+	$out = ob_get_clean(); //缓冲输出给$out 变量
+	$out = preg_replace('/=\>\n\s+/',' => ',$out); //高亮=>后面的值
+	$out = preg_replace_callback('/\n(\s*)([\}\[])/','pr_replace_callback',$out); //高亮=>后面的值
+
+	$out = preg_replace('/"(.*)"/','<b id="debug_var_str">"\\1"</b>', $out); //高亮字符串变量
+	$out = preg_replace('/\[(.*)\]/','<b id="debug_tag">[</b><b id="debug_var">\\1</b><b id="debug_tag">]</b>', $out); //高亮变量
+	$out = preg_replace('/\((.*)\)/','<b id="debug_tag">(</b><b id="debug_var">\\1</b><b id="debug_tag">)</b>', $out); //高亮变量
+	$out = str_replace(array('=>',"\n\n"), array('<b id="debug_set">=></b>',"\n"), $out);
+	$keywords = array('array','int','string','class','object','null','float','bool'); //关键字高亮
 	$keywords_to = $keywords;
 	foreach($keywords as $key => $val) {
 		$keywords_to[$key] = '<b id="debug_keywords">' . $val . '</b>';
-	} 
+	}
 	$out = str_replace($keywords, $keywords_to, $out);
-	$out = str_replace("\n\n", "\n", $out);
-	echo $style . '<pre id="debug"><b id="debug_keywords">' . get_var_name($var) . '</b> = ' . $out . '</pre>';
+	echo $style.'<pre id="debug">'.$out.'</pre>';
 	if ($exit) exit; //为真则退出
-} 
-
-/**
- * 调试输出变量，对象的值。
- * 参数任意个(任意类型的变量)
- * 
- * @return echo 
- */
-function debug_out(){
-	$avg_num = func_num_args();
-	$avg_list = func_get_args();
-	ob_start();
-	for($i = 0; $i < $avg_num; $i++) {
-		pr($avg_list[$i]);
-	} 
-	$out = ob_get_clean();
-	echo $out;
-	exit;
 }
+function dump(){call_user_func('pr',func_get_args());}
+function debug_out(){call_user_func('pr',func_get_args());}
 
 /**
- * 取$from~$to范围内的随机数
- * 
- * @param  $from 下限
- * @param  $to 上限
- * @return unknown_type 
+ * 取$from~$to范围内的随机数,包含$from,$to;
  */
 function rand_from_to($from, $to){
-	$size = $to - $from; //数值区间
-	$max = 30000; //最大
-	if ($size < $max) {
-		return $from + mt_rand(0, $size);
-	} else {
-		if ($size % $max) {
-			return $from + random_from_to(0, $size / $max) * $max + mt_rand(0, $size % $max);
-		} else {
-			return $from + random_from_to(0, $size / $max) * $max + mt_rand(0, $max);
-		} 
-	} 
-} 
+	return mt_rand($from,$to);
+	// return $from + mt_rand(0, $to - $from);
+}
 
 /**
  * 产生随机字串，可用来自动生成密码 默认长度6位 字母和数字混合
@@ -971,7 +1003,7 @@ function des_encode($key, $text){
 	return base64_encode($encrypted);
 } 
 function pkcs5_unpad($text){
-	$pad = ord($text{strlen($text)-1});
+	$pad = ord($text[strlen($text)-1]);
 	if ($pad > strlen($text)) return $text;
 	if (strspn($text, chr($pad), strlen($text) - $pad) != $pad) return $text;
 	return substr($text, 0, -1 * $pad);
@@ -979,4 +1011,4 @@ function pkcs5_unpad($text){
 function pkcs5_pad($text, $block = 8){
 	$pad = $block - (strlen($text) % $block);
 	return $text . str_repeat(chr($pad), $pad);
-} 
+}

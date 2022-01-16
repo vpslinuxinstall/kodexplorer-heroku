@@ -2,28 +2,40 @@
 
 //扩展名权限判断 有权限则返回1 不是true
 function checkExt($file){
+	if($GLOBALS['isRoot']) return 1;
+	if($file == '.htaccess' || $file == '.user.ini') return false;
 	if (strstr($file,'<') || strstr($file,'>') || $file=='') {
 		return 0;
 	}
-	$notAllow = $GLOBALS['auth']['extNotAllow'];
-
+	
 	//'php|phtml|phtm|pwml|asp|aspx|ascx|jsp|pl|htaccess|shtml|shtm'
-	if(strstr($notAllow,'php')){
-		$notAllow .= 'php|phtml|phtm|htaccess|pwml';
-	}
-	if( strstr($notAllow,'|htm') || strstr($notAllow,'htm|') ){
-		$notAllow .= 'html|htm|shtml|shtm';
-	}
-	if( strstr($notAllow,'asp')){
-		$notAllow .= 'asp|aspx|ascx|jsp|pl';
-	}	
+	$notAllow = strtolower($GLOBALS['auth']['extNotAllow']);
 	$extArr = explode('|',$notAllow);
+	if(in_array('asp',$extArr)){
+		$extArr = array_merge($extArr,array('aspx','ascx','pwml'));
+	}
+	if(in_array('php',$extArr)){
+		$extArr = array_merge($extArr,array('phtml','phtm','htaccess','pwml'));
+	}
+	if(in_array('htm',$extArr) || in_array('html',$extArr)){
+		$extArr = array_merge($extArr,array('html','shtml','shtm','html','svg'));
+	}
 	foreach ($extArr as $current) {
 		if ($current !== '' && stristr($file,'.'.$current)){//含有扩展名
 			return 0;
 		}
 	}
 	return 1;
+}
+function checkExtSafe($file){
+	if($file == '.htaccess' || $file == '.user.ini') return false;
+	if (strstr($file,'<') || strstr($file,'>') || $file=='') return false;
+	$disable  = 'php|phtml|phtm|pwml|asp|aspx|ascx|jsp|pl|html|htm|svg|shtml|shtm';
+	$extArr = explode('|',$disable);
+	foreach ($extArr as $ext) {
+		if ($ext && stristr($file,'.'.$ext)) return false;
+	}
+	return true;
 }
 
 //-----解压缩跨平台编码转换；自动识别编码-----
@@ -40,34 +52,37 @@ function zip_pre_name($fileName,$toCharset=false){
 		$toCharset = 'utf-8';
 		$clientLanugage = I18n::defaultLang();
 		$langType = I18n::getType();
-		if(client_is_windows() && (
+		if( client_is_windows() && (
 			$clientLanugage =='zh-CN' || 
 			$clientLanugage =='zh-TW' || 
 			$langType =='zh-CN' ||
-			$langType =='zh-TW')
-			){
+			$langType =='zh-TW' )
+		){
 			$toCharset = "gbk";//压缩或者打包下载压缩时文件名采用的编码
 		}
 	}
 
-	//write_log("zip:".$charset.';'.$toCharset.';'.$fileName,'zip');
 	$result = iconv_to($fileName,$charset,$toCharset);
 	if(!$result){
 		$result = $fileName;
 	}
+	//write_log("zip:".$charset.'=>'.$toCharset.';'.$fileName.'=>'.$result,'zip');
 	return $result;
 }
 
-//解压缩文件名检测
 function unzip_filter_ext($name){
 	$add = '.txt';
-	if(checkExt($name)){//允许
+	if( checkExt($name) &&
+		!stristr($name,'user.ini') &&
+		!stristr($name,'.htaccess')
+	){//允许
 		return $name;
 	}
 	return $name.$add;
 }
 //解压到kod，文件名处理;识别编码并转换到当前系统编码
 function unzip_pre_name($fileName){
+	$fileName = str_replace(array('../','..\\',''),'',$fileName);
 	if (!function_exists('iconv')){
 		return unzip_filter_ext($fileName);
 	}
@@ -109,6 +124,35 @@ function unzip_charset_get($list){
 	return $keys[0];
 }
 
+/**
+ * 服务器相关环境
+ * 检测环境是否支持升级版本
+ */
+function serverInfo(){
+	$lib = array(
+		"sqlit3"=>intval( class_exists('SQLite3') ),
+		"sqlit" =>intval( extension_loaded('sqlite') ),
+		"curl"	=>intval( function_exists('curl_init') ),
+		"pdo"	=>intval( class_exists('PDO') ),
+		"mysqli"=>intval( extension_loaded('mysqli') ),
+		"mysql"	=>intval( extension_loaded('mysql') ),
+	);
+	$libStr = "";
+	foreach($lib as $key=>$val){
+		$libStr .= $key.'='.$val.';';
+	}
+	$system = explode(" ", php_uname());
+	$env = array(
+		"sys"   => strtolower($system[0]),
+		"php"	=> floatval(PHP_VERSION),
+		"server"=> $_SERVER['SERVER_SOFTWARE'],
+		"lib"	=> $libStr,
+		"info"	=> php_uname().';php='.PHP_VERSION,
+	);
+	$result = str_replace("\/","@",json_encode($env));
+	return $result;
+}
+
 function charset_check(&$str,$check,$tempCharset='utf-8'){
 	if ($str === '' || !function_exists("mb_convert_encoding")){
 		return false;
@@ -148,12 +192,12 @@ function get_charset(&$str) {
 	$charsetGet = $charset;
 	if ($charset == 'cp936'){
 		// 有交叉，部分文件无法识别
-		if(charset_check($str,'gbk') && charset_check($str,'gbk','big5')){
-			$charset = 'gbk';
-		}else if(charset_check($str,'big5') && charset_check($str,'big5','gbk')){
-			$charset = 'big5';
-		}else if(charset_check($str,'ISO-8859-4')){
+		if(charset_check($str,'ISO-8859-4') && !charset_check($str,'gbk') && !charset_check($str,'big5')){
 			$charset = 'ISO-8859-4';
+		}elseif(charset_check($str,'gbk') && !charset_check($str,'big5')){
+			$charset = 'gbk';
+		}else if(charset_check($str,'big5')){
+			$charset = 'big5';
 		}
 	}else if ($charset == 'euc-cn'){
 		$charset = 'gbk';
@@ -165,8 +209,8 @@ function get_charset(&$str) {
 		$check = array(
 			'utf-8'       => $charset,
 			'utf-16'      => 'gbk',
-			'cp1252'      => 'utf-8',
 			'cp1251'      => 'utf-8',
+			'cp1252'      => 'utf-8'			
 		);
 		foreach($check as $key => $val){
 			if(charset_check($str,$key,$val)){
@@ -196,7 +240,7 @@ function file_upload_size(){
 }
 
 function check_list_dir(){
-	$url = APP_HOST.'lib/core/';
+	$url = APP_HOST.'app/core/';
 	$find = "Application.class.php";
 	
 	@ini_set('default_socket_timeout',1);
@@ -211,6 +255,7 @@ function check_list_dir(){
 function php_env_check(){
 	$error = '';
 	if(!function_exists('iconv')) $error.= '<li>'.LNG('php_env_error').' iconv</li>';
+	if(!function_exists('json_encode')) $error.= '<li>'.LNG('php_env_error').' json</li>';
 	if(!function_exists('curl_init')) $error.= '<li>'.LNG('php_env_error').' curl</li>';
 	if(!function_exists('mb_convert_encoding')) $error.= '<li>'.LNG('php_env_error').' mb_string</li>';
 	if(!function_exists('file_get_contents')) $error.='<li>'.LNG('php_env_error').' file_get_contents</li>';
@@ -240,42 +285,44 @@ function php_env_check(){
 	return $error;
 }
 
+//提前判断版本是否一致；
+function check_cache(){
+	//检查是否更新失效
+	$content = file_get_contents(BASIC_PATH.'config/version.php');
+	$result  = match_text($content,"'KOD_VERSION','(.*)'");
+	if($result != KOD_VERSION){
+		show_tips("您服务器开启了php缓存,文件更新尚未生效;
+			请关闭缓存，或稍后1分钟刷新页面再试！
+			<a href='http://www.tuicool.com/articles/QVjeu2i' target='_blank'>了解详情</a>");
+	}
+}
 
 function init_common(){
 	$GLOBALS['in'] = parse_incoming();
 	if(!file_exists(DATA_PATH)){
 		show_tips("data 目录不存在!\n\n(检查 DATA_PATH);");
 	}
-
-	//检查是否更新失效
-	$content = file_get_contents(BASIC_PATH.'config/version.php');
-	$result  = match($content,"'KOD_VERSION','(.*)'");
-	if($result != KOD_VERSION){
-		show_tips("您服务器开启了php缓存,文件更新尚未生效;
-			请关闭缓存，或稍后1分钟刷新页面再试！
-			<a href='http://www.tuicool.com/articles/QVjeu2i' target='_blank'>了解详情</a>");
-	}
-
 	// session path create and check
 	$errorTips = "[Error Code:1002] 目录权限错误！请设置程序目录及所有子目录为读写状态，
 				linux 运行如下指令：
 				<pre>su -c 'setenforce 0'\nchmod -R 777 ".BASIC_PATH.'</pre>';
-	//检查session是否存在
-	if( !file_exists(KOD_SESSION) ||
-		!file_exists(KOD_SESSION.'index.html')){
-		mk_dir(KOD_SESSION);
-		touch(KOD_SESSION.'index.html');
-		if(!file_exists(KOD_SESSION.'index.html') ){
+	if( !defined('SESSION_PATH_DEFAULT') ){
+		//检查session是否存在
+		if( !file_exists(KOD_SESSION) ||
+			!file_exists(KOD_SESSION.'index.html')){
+			mk_dir(KOD_SESSION);
+			touch(KOD_SESSION.'index.html');
+			if(!file_exists(KOD_SESSION.'index.html') ){
+				show_tips($errorTips);
+			}
+		}
+		//检查目录权限
+		if( !is_writable(KOD_SESSION) || 
+			!is_writable(KOD_SESSION.'index.html') || 
+			!is_writable(DATA_PATH.'system/apps.php') ||
+			!is_writable(DATA_PATH)){
 			show_tips($errorTips);
 		}
-	}
-
-	//检查目录权限
-	if( !is_writable(KOD_SESSION) || 
-		!is_writable(KOD_SESSION.'index.html') || 
-		!is_writable(DATA_PATH.'system/apps.php') ||
-		!is_writable(DATA_PATH)){
-		show_tips($errorTips);
 	}
 	
 	//version check update 
@@ -348,12 +395,6 @@ function init_setting(){
 		$roleGroup = FileCache::load($roleGroupFile);
 	}
 	$GLOBALS['config']['pathRoleGroup'] = $roleGroup;
-	
-	//load user config
-	$settingUser = BASIC_PATH.'config/setting_user.php';
-	if (file_exists($settingUser)) {
-		include($settingUser);
-	}
 
 	if(is_array($GLOBALS['L'])){
 		I18n::set($GLOBALS['L']);
@@ -383,8 +424,13 @@ function user_logout(){
 	setcookie('X-CSRF-TOKEN','',time()-3600);
 
 	$url = './index.php?user/login';
-	if(ACT != 'logout'){ //不是主动退出则登陆后跳转到之前页面
+	//之前界面维持，不是主动退出则登陆后跳转到之前页面
+	if(ACT != 'logout' && count($_GET)!=0 ){
 		$url .= '&link='.rawurlencode(this_url());
+	}
+	//移动端；接口请求时退出
+	if(isset($_REQUEST['HTTP_X_PLATFORM'])){
+		show_json('login error!',10001);
 	}
 	header('Location:'.$url);
 	exit;
@@ -484,5 +530,5 @@ function check_user_select($info){
 			return true;
 		}
 	}
-	return false;	
+	return false;
 }

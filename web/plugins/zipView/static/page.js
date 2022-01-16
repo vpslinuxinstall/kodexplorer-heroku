@@ -1,4 +1,7 @@
 define(function(require, exports) {
+	if(!core.authCheck('explorer.fileDownload')){
+		$(".context-menu-list .open-browser").remove();
+	}
 	var menuAction = function(action,option){
 		//console.log(action,option);
 		var zip = function(fileType){
@@ -8,7 +11,7 @@ define(function(require, exports) {
 		var unZip = function(createFolder){
 			if(!ui.path.checkSystemPath()) return;
 			var oprate = ui.path.pathOperate;
-			ui.pathOperate.unZip(ui.path.makeParam().path,ui.f5,createFolder);
+			oprate.unZip(ui.path.makeParam().path,ui.f5,createFolder);
 		};
 		switch(action){
 			case 'zip-zip': zip();break;
@@ -44,8 +47,7 @@ define(function(require, exports) {
 	}
 	var menuAdd = function(){
 		if (!core.authCheck('explorer.zip')) {
-			$('.context-menu-list .zip').addClass('hidden');
-			//option.zip = false;
+			return;
 		}
 
 		$.contextMenu.menuAdd({zip:option.zip},'.menu-more',false,'.clone');

@@ -17,6 +17,7 @@
  * ------------
  * 7zip命令行:http://blog.csdn.net/earbao/article/details/51382534
  * rar命令行 :http://www.cnblogs.com/fetty/p/4769279.html
+ * 7za命令行 :https://www.mankier.com/1/7za //当rar解压失败时尝试调用系统内置7za解压; 支持大于60G文件
  */
 
 
@@ -81,7 +82,21 @@ class kodRarArchive {
 			}
 		}
 		$result = self::run($command);
-		//pr($result);pr($command);exit;
+
+        //7za 兼容 rar解压大文件
+		if(strstr($result['data'],'is not RAR archive') && shell_exec('7za')){
+		    $param = ' -y -o'.escapeShell($dest).' '.escapeShell($file).' ';
+			if($partName === false){
+				$command = '7za  x'.$param;
+			}else if(is_array($partName)){
+				$command = '7za  x'.$param.escapeShell($partName[0]);
+			}else{
+				$command = '7za  e'.$param.escapeShell($partName);
+			}
+			$result = self::run($command);
+		}
+		
+		//echo "<pre>";var_dump($result,$command);exit;
 		if(!$result['code']){
 			return $result;
 		}
@@ -90,7 +105,6 @@ class kodRarArchive {
 		if( is_array($partName) ){
 			$thePath = trim(str_replace("\\",'/',$partName[0]),'/');
 			$pathGroup = explode('/',$thePath);
-			
 			//一级目录解压不用移动
 			if(count($pathGroup) > 1){
 				move_path($dest.$partName[0],$dest.get_path_this($thePath));
@@ -101,21 +115,8 @@ class kodRarArchive {
 		}
 		
 		//扩展名处理;文件名重命名处理
-		recursion_dir($dest,$dirs,$files,-1,0);
-		foreach($dirs as $f){
-			$itemPath = str_replace(array($dest,"\\"),array('','/'),$f);
-			$itemPath = unzip_pre_name($itemPath);
-			$from = $dest.get_path_father($itemPath).get_path_this($f);
-			if(strstr($itemPath,'/') == false){
-				$from = $dest.get_path_this($f);
-			}
-			//echo $from.'==><br/>'.$dest.$itemPath.'<hr/>';
-			if($dest.$itemPath != $from){
-				@rename($from,$dest.$itemPath);
-			}
-		}
-		
-		foreach($files as $f){
+		$arr = dir_list($dest);
+		foreach($arr as $f){
 			$itemPath = str_replace(array($dest,"\\"),array('','/'),$f);
 			$itemPath = unzip_pre_name($itemPath);
 			$from = $dest.get_path_father($itemPath).get_path_this($f);
@@ -141,7 +142,11 @@ class kodRarArchive {
 
 	static function listContentRar($file) {
 		$command = self::bin('rar').' v '.escapeShell($file);
-		$result = self::run($command);
+		$result = self::run($command);	
+		//7za 兼容 rar解压大文件
+		if(strstr($result['data'],'is not RAR archive') && shell_exec('7za')){
+			return self::listContent7z($file,'7za l ');
+		}
 		if(!$result['code']){
 			return $result;
 		}
@@ -153,7 +158,7 @@ class kodRarArchive {
 
 		//windows  :...D...   93691   82633  88%  2016-12-09 02:20  396CC62C  000/a/32486963.png
 		//linux:   :-rwxr-xr-x   93691   82643  88%  2016-12-09 02:20  396CC62C  000/a/32486963.png
-		$reg = '/\s*([-\.\w]+)\s+(\d+)\s+(\d+)\s+\d+%\s+(\d{2,4}-\d{2}-\d{2} \d{2}:\d{2})\s+\w+\s+(.*)\n/i';
+		$reg = '/\s*([-\.\w]+)\s+(\d+)\s+(\d+)\s+\d+%|-+>\s+(\d{2,4}-\d{2}-\d{2} \d{2}:\d{2})\s+\w+\s+(.*)\n/i';
 		preg_match_all($reg,$match[1]."\n",$matchItem);
 		if( !is_array($matchItem) || 
 			count($matchItem) != 6 ||
@@ -178,8 +183,11 @@ class kodRarArchive {
 		//debug_out($result,$match,$matchItem,$itemArr);
 		return array('code'=>true,'data'=>$itemArr);
 	}
-	static function listContent7z($file) {
+	static function listContent7z($file,$bin=false) {
 		$command = self::bin('7z').' l '.escapeShell($file);
+		if($bin){
+			$command = $bin.escapeShell($file);
+		}
 		$result = self::run($command);
 		if(!$result['code']){
 			return $result;
@@ -231,16 +239,16 @@ class kodRarArchive {
 	// 	$command = $command.self::bin().' a -r -y -t'.$ext.' '.$passwd.' "'.$file.'" *';
 	// 	return self::run($command);
 	// }
-	
 }
 
 // 不允许双引号
 function escapeShell($param){
+	return escapeshellarg($param);
 	//$param = escapeshellarg($param);
 	$os = strtoupper(substr(PHP_OS, 0,3));
 	if ( $os != 'WIN' && $os != 'DAR') {//linux
 		$param = str_replace('!','\!',$param);
 	}
 	$param = rtrim($param,"\\");
-	return '"'.str_replace(array('"',"\0"),'_',$param).'"';
+	return '"'.str_replace(array('"',"\0",'`'),'_',$param).'"';
 }

@@ -4,13 +4,19 @@
 	<link rel="stylesheet" href="<?php echo STATIC_PATH;?>style/skin/<?php echo $config['user']['theme'];?>.css?ver=<?php echo KOD_VERSION;?>" id='link-theme-style'/>
 	
   </head>
-  <body <?php echo $codeThemeBlack;?>>
+<body <?php echo $codeThemeBlack;?>>
+	<div class="init-loading">
+		<div><img src="<?php echo STATIC_PATH;?>images/common/loading_simple.gif?v=<?php echo KOD_VERSION;?>"/></div>
+	</div>
 	<div class="edit-main" style="height: 100%;" oncontextmenu="return core.contextmenu();">
 		<div class="tools">
 			<div class="left top-toolbar">
 				<div class="disable-mask"></div>
 				<a action="save" href="javascript:;" title="<?php echo LNG('button_save');?>(Ctrl-S)"><i class="font-icon icon-save"></i></a>
 				<a action="saveall" href="javascript:;" title="<?php echo LNG('button_save_all');?>"><i class="font-icon icon-paste"></i></a>
+				<span class="line"></span>
+				<a href="javascript:;" id="editor-history-back" title="<?php echo LNG('history_back');?>(Ctrl -)"><i class="font-icon icon-chevron-left"></i></a>
+				<a href="javascript:;" id="editor-history-next" title="<?php echo LNG('history_next');?>(Ctrl Shift -)"><i class="font-icon icon-chevron-right"></i></a>
 				<span class="line"></span>
 				<a action="undo" href="javascript:;" title="<?php echo LNG('undo');?>(Ctrl-Z)"><i class="font-icon icon-undo"></i></a>
 				<a action="redo" href="javascript:;" title="<?php echo LNG('redo');?>(Ctrl-Y)"><i class="font-icon icon-repeat"></i></a>
@@ -49,7 +55,8 @@
 				</div>
 			</div>
 			<div class="edit-body">
-				<div class="introduction">
+				<div class="introduction hidden">
+					<button class="btn btn-default font-icon icon-remove close-item"></button>
 					<?php include(LANGUAGE_PATH.I18n::getType().'/edit.html');?>
 					<div style="clear:both"></div>
 				</div>
@@ -57,6 +64,7 @@
 				<div class="bottom-toolbar hidden">
 					<a class="toolbar-menu menu-view-goto-line editor_position" href="javascript:;">0:0</a>
 					<a class="file-mode" href="javascript:;">text</a>
+					<a class="toolbar-menu menu-view-file-charset " href="javascript:;">UTF-8</a>
 					<a class="toolbar-menu menuViewTab config-tab" href="javascript:;">Tabs:4</a>
 					<a class="toolbar-menu menu-view-setting config" href="javascript:;"><i class="font-icon icon-cog"></i></a>
 					<div style="clear:both"></div>

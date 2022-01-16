@@ -35,10 +35,14 @@ class user extends Controller{
 			$this->notCheckApp = array('pluginApp.to','api.view');
 		}
 		$this->config['forceWap'] = is_wap() && (!isset($_COOKIE['forceWap']) || $_COOKIE['forceWap'] == '1');
+		if( isset($_GET['forceWap']) ){
+			$this->config['forceWap'] = $_GET['forceWap'];
+		}
 	}
 
 	public function bindHook(){
 		$this->loadModel('Plugin')->init();
+		$this->bindCheckPassword();
 	}
 
 	/**
@@ -62,7 +66,7 @@ class user extends Controller{
 			if (!is_array($user) || !isset($user['password'])) {
 				$this->logout();
 			}
-			if($this->_makeLoginToken($user) == $_COOKIE['kodToken']){
+			if($this->_makeLoginToken($user) === $_COOKIE['kodToken']){
 				@session_start();//re start
 				$_SESSION['kodLogin'] = true;
 				$_SESSION['kodUser']= $user;
@@ -135,8 +139,11 @@ class user extends Controller{
 			$GLOBALS['webRoot'] = '';//从服务器开始到用户目录
 			$GLOBALS['isRoot'] = 0;
 		}
-
-		define('DESKTOP_FOLDER',$this->config['settingSystemDefault']['desktopFolder']);
+		$desktop = $this->config['settingSystem']['desktopFolder'];
+		if(isset($this->config['settingSystemDefault']['desktopFolder'])){
+			$desktop = $this->config['settingSystemDefault']['desktopFolder'];
+		}
+		define('DESKTOP_FOLDER',$desktop);
 		$this->config['user']  = FileCache::load(USER.'data/config.php');
 
 		if(!is_array($this->config['user'])){
@@ -147,6 +154,42 @@ class user extends Controller{
 				$this->config['user'][$key] = $val;
 			}
 		}
+	}
+	
+	private function _loginCheckPassword($user,$password){
+		if($this->checkPassword($password)) return;
+		if($user['role'] == '1'){ // 管理员,提示修改;
+			if(isset($_SESSION['adminPasswordTips'])) return;
+			@session_start();
+			$_SESSION['adminPasswordTips']= 1;
+			@session_write_close();
+			show_tips("安全提示:<br/><br/>密码长度必须大于6,同时包含英文和数字;<br/>强烈建议登陆后修改密码!",false);
+		}
+		show_tips("密码长度必须大于6,同时包含英文和数字;<br/>请联系管理员修改后再试!",false);
+	}
+	private function checkPassword($password){
+		if(defined('INSTALL_CHANNEL') && INSTALL_CHANNEL =='hikvision.com'){
+			$this->config['settingSystemDefault']['passwordCheck'] = '1';
+		}
+		if($this->config['settingSystemDefault']['passwordCheck'] == '0') return true;
+
+		$hasNumber = preg_match('/\d/',$password);
+		$hasChar   = preg_match('/[A-Za-z]/',$password);
+		if( strlen($password) >= 6 && $hasNumber && $hasChar) return true;
+		return false;
+	}
+	private function bindCheckPassword(){
+		$action = strtolower(ST.'.'.ACT);
+		$check  = array(
+			'user.changepassword' 	=> 'passwordNew',
+			'systemmember.edit'		=> 'password',
+			'systemmember.add'		=> 'password',
+		);
+		if(!isset($check[$action])) return;
+		
+		$password = $this->in[$check[$action]];
+		if($this->checkPassword($password)) return;
+		show_json("密码长度必须大于6,同时包含英文和数字;<br/>请联系管理员修改后再试!",false);
 	}
 
 	/**
@@ -196,7 +239,8 @@ class user extends Controller{
 				){
 				$result = true;
 			}else{
-				$error = $this->in['check'].' 没有权限, 配置权限需要为: "'.$this->in['value'].'"';
+				$error = clear_html($this->in['check']).' 没有权限, 配置权限需要为: "'
+						.clear_html($this->in['value']).'"';
 			}
 		}
 		if($result){
@@ -207,8 +251,13 @@ class user extends Controller{
 		}
 		$this->login($error);
 	}
-
-	
+	public function accessToken(){
+		if($_SESSION['kodLogin'] === true){
+			show_json(access_token_get(),true);
+		}else{
+			show_json('not login!',false);
+		}
+	}
 
 	//临时文件访问
 	public function publicLink(){
@@ -240,8 +289,9 @@ class user extends Controller{
 			'userID'        => $this->user['userID'],
 			'webRoot'       => $GLOBALS['webRoot'],
 			'webHost'       => HOST,
-			'appHost'       => APP_HOST,
+			'appHost'       => APP_HOST,			
 			'staticPath'    => STATIC_PATH,
+			'appIndex'  	=> $_SERVER['SCRIPT_NAME'],
 			'basicPath'     => $basicPath,
 			'userPath'      => $userPath,
 			'groupPath'     => $groupPath,
@@ -252,6 +302,7 @@ class user extends Controller{
 				'updloadChunkSize'	=> file_upload_size(),
 				'updloadThreads'	=> $this->config['settings']['updloadThreads'],
 				'updloadBindary'	=> $this->config['settings']['updloadBindary'],
+				'uploadCheckChunk'	=> $this->config['settings']['uploadCheckChunk'],
 
 				'paramRewrite'		=> $this->config['settings']['paramRewrite'],
 				'pluginServer'		=> $this->config['settings']['pluginServer'],
@@ -259,11 +310,13 @@ class user extends Controller{
 			),
 			'phpVersion'	=> PHP_VERSION,
 			'version'       => KOD_VERSION,
+			'versionBuild'  => KOD_VERSION_BUILD,
 			'kodID'			=> md5(BASIC_PATH.$this->config['settingSystem']['systemPassword']),
 			'jsonData'   	=> "",
 			'selfShare'		=> systemMember::userShareList($this->user['userID']),
 			'userConfig' 	=> $this->config['user'],
 			'accessToken'	=> access_token_get(),
+			'versionEnv'	=> base64_encode(serverInfo()),
 
 			//虚拟目录
 			'KOD_GROUP_PATH'		=>	KOD_GROUP_PATH,
@@ -274,21 +327,46 @@ class user extends Controller{
 			'KOD_USER_FAV'			=>	KOD_USER_FAV,
 			'KOD_GROUP_ROOT_SELF'	=>	KOD_GROUP_ROOT_SELF,
 			'KOD_GROUP_ROOT_ALL'	=>	KOD_GROUP_ROOT_ALL,
+			'ST'					=> $this->in['st'],
+			'ACT'					=> $this->in['act'],
 		);
 		if(isset($this->config['settingSystem']['versionHash'])){
 			$theConfig['versionHash'] = $this->config['settingSystem']['versionHash'];
+			$theConfig['versionHashUser'] = $this->config['settingSystem']['versionHashUser'];
 		}
 		if (!isset($GLOBALS['auth'])) {
 			$GLOBALS['auth'] = array();
 		}
 		
 		$useTime = mtime() - $GLOBALS['config']['appStartTime'];
-		header("Content-Type: application/javascript");
+		header("Content-Type: application/javascript; charset=utf-8");
 		echo 'if(typeof(kodReady)=="undefined"){kodReady=[];}';
 		Hook::trigger('user.commonJs.insert',$this->in['st'],$this->in['act']);
-		echo 'AUTH='.json_encode($GLOBALS['auth']).';';
+		echo ';AUTH='.json_encode($GLOBALS['auth']).';';
 		echo 'G='.json_encode($theConfig).';';
-		echo 'LNG='.json_encode(I18n::getAll()).';G.useTime='.$useTime.';';
+
+		$lang = json_encode_force(I18n::getAll());
+		if(!$lang){
+			$lang = '{}';
+		}
+		echo 'LNG='.$lang.';G.useTime='.$useTime.';';
+	}
+	public function appConfig(){
+		$theConfig = array(
+			'lang'          => I18n::getType(),			
+			'isRoot'        => $GLOBALS['isRoot'],
+			'userID'        => $this->user['userID'],
+			'myhome'        => MYHOME,
+			'settings'		=> array(
+				'updloadChunkSize'	=> file_upload_size(),
+				'updloadThreads'	=> $this->config['settings']['updloadThreads'],
+				'uploadCheckChunk'	=> $this->config['settings']['uploadCheckChunk'],
+			),
+			'version'       => KOD_VERSION,
+			'versionBuild'  => KOD_VERSION_BUILD,
+			// 'userConfig' 	=> $this->config['user'],
+		);
+		show_json($theConfig);
 	}
 
 	/**
@@ -370,7 +448,7 @@ class user extends Controller{
 				count($param) != 2 || 
 				md5(base64_decode($param[0]).$api_token) != $param[1]
 				){
-				$this->_loginDisplay("Api param error!",false);
+				$this->_loginDisplay("API 接口参数错误!",false);
 			}
 			$this->in['name'] = urlencode(base64_decode($param[0]));
 			$apiLoginCheck = true;
@@ -387,10 +465,16 @@ class user extends Controller{
 
 		$name = rawurldecode($this->in['name']);
 		$password = rawurldecode($this->in['password']);
+
+		if($this->in['salt']){
+			$key = substr($password,0,5)."2&$%@(*@(djfhj1923";
+			$password = Mcrypt::decode(substr($password,5),$key);
+		}
+
 		$member = systemMember::loadData();
 		$user = $member->get('name',$name);
 		if($apiLoginCheck && $user){//api自动登陆
-		}else if ($user === false || md5($password)!=$user['password']){
+		}else if ($user === false || md5($password) !== $user['password']){
 			$this->_loginDisplay(LNG('password_error'),false);//$member->get()
 		}else if($user['status'] == 0){
 			$this->_loginDisplay(LNG('login_error_user_not_use'),false);
@@ -399,8 +483,9 @@ class user extends Controller{
 		}
 
 		//首次登陆，初始化app 没有最后登录时间
+		$this->_loginCheckPassword($user,$password);
 		$this->_loginSuccess($user);//登陆成功
-		if($user['lastLogin'] == ''){
+		if(!$user['lastLogin']){
 			$app = init_controller('app');
 			$app->initApp($user);
 		}
@@ -420,6 +505,9 @@ class user extends Controller{
 	}
 	private function _loginDisplay($msg,$success){
 		if(isset($this->in['isAjax'])){
+			if(isset($this->in['getToken']) && $success){
+				show_json(access_token_get(),true);
+			}
 			show_json($msg,$success);
 		}else{
 			if($success){
@@ -549,7 +637,7 @@ class user extends Controller{
 	}
 	public function checkCode() {
 		session_start();//re start
-		$captcha = new MyCaptcha(mt_rand(3,4));
+		$captcha = new MyCaptcha(4);
 		$_SESSION['checkCode'] = $captcha->getString();
 	}
 
@@ -559,7 +647,7 @@ class user extends Controller{
 			ob_get_clean();
 			QRcode::png($this->in['url']);
 		}else{
-			header('location: http://qr.topscan.com/api.php?text='.rawurlencode($url));
+			header('location: https://demo.kodcloud.com/?user/view/qrcode&url='.rawurlencode($url));
 		}
 	}
 }

@@ -24,7 +24,7 @@ class PluginBase{
 
 		$this->pluginName = str_replace('Plugin','',get_class($this));
 		$this->pluginPath = PLUGIN_DIR.$this->pluginName.'/';
-		$this->pluginApi  = APP_HOST.'index.php?pluginApp/to/'.$this->pluginName.'/';
+		$this->pluginApi  = rtrim(APP_HOST,'/').'/index.php?pluginApp/to/'.$this->pluginName.'/';
 		$this->pluginHost = $this->config['settings']['pluginHost'].$this->pluginName.'/';
 		$this->pluginHostDefault = PLUGIN_HOST.$this->pluginName.'/';
 		$this->pluginLangArr = $this->initLang();
@@ -35,6 +35,7 @@ class PluginBase{
 		$this->setConfig(array());
 	}
 	public function install(){}
+	public function update(){}
 	public function unInstall(){}
 
 
@@ -49,7 +50,7 @@ class PluginBase{
 		if(!is_array($systemConfig['pluginList'])){
 			$systemConfig['pluginList'] = array();
 		}
-		if(is_array($systemConfig['pluginList'][$name])){
+		if(is_array($systemConfig['pluginList'][$id])){ 
 			$systemConfig['pluginList'][$id]['regiest'] = $array;
 		}else{
 			$systemConfig['pluginList'][$id] = array(
@@ -78,7 +79,7 @@ class PluginBase{
 				show_json(LNG('url error!'),false);
 			}
 			$cacheName = md5($path.'kodcloud').'.'.get_path_ext($path);
-			$cacheFile = TEMP_PATH.$this->pluginName.'/files/'.$cacheName;
+			$cacheFile = $this->filePathName($cacheName);
 			mk_dir(get_path_father($cacheFile));
 			if(!file_exists($cacheFile)){
 				$result = url_request($path,'DOWNLOAD',$cacheFile);
@@ -91,8 +92,8 @@ class PluginBase{
 				version_compare(phpversion(), '7.1.0', '>=') &&
 				preg_match("/([\x81-\xfe][\x40-\xfe])/", $path, $match)){
 
-				$name = hash_path($path).'.'.get_path_ext($path);
-				$cacheFile = TEMP_PATH.$this->pluginName.'/files/'.$name;
+				$cacheName = hash_path($path).'.'.get_path_ext($path);
+				$cacheFile = $this->filePathName($cacheName);
 				mk_dir(get_path_father($cacheFile));
 				if(!file_exists($cacheFile)){
 					@copy($path,$cacheFile);
@@ -104,6 +105,10 @@ class PluginBase{
 			show_tips(LNG('file').' '.LNG('not_exists'));
 		}
 		return $path;
+	}
+	private function filePathName($fileName){
+		if(! checkExtSafe($fileName)){$fileName = $fileName.'.txt';}
+		return TEMP_PATH.$this->pluginName.'/files/'.$fileName;
 	}
 
 	/**
@@ -123,6 +128,32 @@ class PluginBase{
 		$this->packageData = $result;
 		return $result;
 	}
+	
+	/**
+	 * 获取package.json中的数据;通过key获取，支持auther.copyright 多级获取
+	 * @param  [type] $key [description]
+	 * @return [type]      [description]
+	 */
+	public function packageInfoGet($key){
+		$data = $this->appPackage();
+		$result = null;
+		$keyArr = explode('.',$key);
+		for ($i = 0; $i < count($keyArr); $i++) {
+			if($i == 0){
+				$result = $data[$keyArr[$i]];
+				continue;
+			}
+			if(is_array($result)){
+				$result = $result[$keyArr[$i]];
+			}else{
+				return null;
+			}
+		}
+		return $result;
+	}
+	public function packageVersion(){return $this->packageInfoGet('version');}
+	public function packageTitle(){return $this->packageInfoGet('title');}
+	public function packageCopyright(){return $this->packageInfoGet('auther.copyright');}
 
 	private function parseFile($file){
 		$content = file_get_contents($file);
@@ -230,10 +261,11 @@ class PluginBase{
 		$lang = I18n::getType();
 		$array = array();
 		if(file_exists($path.$lang.'.php')){
-			$array = include_once($path.$lang.'.php');
+			$array = include($path.$lang.'.php');
 		}else if(file_exists($path.$default.'.php')){
-			$array = include_once($path.$default.'.php');
+			$array = include($path.$default.'.php');
 		}
+		if(!is_array($array)) return array();
 		if(count($array) > 0){
 			I18n::set($array);
 		}

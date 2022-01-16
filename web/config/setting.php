@@ -11,13 +11,14 @@ $config['settings'] = array(
 	'downloadUrlTime'	=> 0,			 //下载地址生效时间，按秒计算，0代表不限制
 	'apiLoginTonken'	=> '',			 //设定则认为开启服务端api通信登陆，同时作为加密密匙
 	'updloadChunkSize'	=> 1024*1024*0.4,//0.4M;分片上传大小设定;需要小于php.ini上传限制的大小
-	'updloadThreads'	=> 5,			 //上传并发数;部分低配服务器上传失败则将此设置为1
-	'updloadBindary'	=> 1,			 //以二进制方式上传;后端服务器以php://input接收;0则为传统方式上传
+	'updloadThreads'	=> 10,			 //上传并发数;部分低配服务器上传失败则将此设置为1
+	'updloadBindary'	=> 0,			 //1:以二进制方式上传;后端服务器以php://input接收;0则为传统方式上传
+	'uploadCheckChunk'	=> true,		 //开关断点续传，一个文件上传一半时中断，同一个文件再次上传到同一个位置时会接着之前的进度上传。
 	'paramRewrite'		=> false,		 //开启url 去除? 直接跟参数
 	'httpSendFile'		=> false,		 //调用webserver下载 http://www.laruence.com/2012/05/02/2613.html; 
 										 //https://www.lovelucy.info/x-sendfile-in-nginx.html
 	
-	'pluginServer'		=> "https://api.kodcloud.com/?",
+	'pluginServer'		=> "http://api.kodcloud.com/?",
 	'staticPath'		=> "./static/",	//静态文件目录,可以配置到cdn;
 	'pluginHost'		=> PLUGIN_HOST  //静态文件目录
 );
@@ -29,6 +30,10 @@ if($config['systemOS'] == 'windows'){
 if(strstr($_SERVER['SERVER_SOFTWARE'],'-IIS')){
 	$config['settings']['updloadBindary'] = 0;
 }
+//自适应https
+if(substr(APP_HOST,0,8) == 'https://'){
+    $config['settings']['pluginServer'] = str_replace("http://",'https://',$config['settings']['pluginServer']);
+}
 
 $config['settings']['appType'] = array(
 	array('type' => 'tools','name' => 'app_group_tools','class' => 'icon-suitcase'),
@@ -39,8 +44,8 @@ $config['settings']['appType'] = array(
 	array('type' => 'others','name' => 'app_group_others','class' => 'icon-ellipsis-horizontal'),
 );
 $config['defaultPlugins'] = array(
-	'adminer','googleDocs','jPlayer','officeLive','simpleClock','VLCPlayer',//'pdfjs',
-	'photoSwipe','picasa','yzOffice','zipView','toolsCommon'
+	'adminer','DPlayer','imageExif','jPlayer','officeLive','photoSwipe','picasa',//'pdfjs',
+	'simpleClock','toolsCommon','VLCPlayer','webodf','yzOffice','zipView'
 );
 
 
@@ -52,25 +57,34 @@ $config['settingSystemDefault'] = array(
 	'pathHidden'		=> "Thumb.db,.DS_Store,.gitignore,.git",//目录列表隐藏的项
 	'autoLogin'			=> "0",			// 是否自动登录；登录用户为guest
 	'needCheckCode'		=> "0",			// 登陆是否开启验证码；默认关闭
-	'firstIn'			=> "explorer",	// 登录后默认进入[explorer desktop,editor]
+	'firstIn'			 => "explorer",	 // 登录后默认进入[explorer desktop,editor]
+	'passwordCheck'		=> '0',			// 是否强制要求密码强度: 长度大于6,包含数字和英文字母;
 
 	'newUserApp'		=> "trello,一起写office,微信,365日历,石墨文档,ProcessOn,计算器,icloud,OfficeConverter",
 	'newUserFolder'		=> "document,desktop,pictures,music",
 	'newGroupFolder'	=> "share,doc,pictures",	//新建分组默认建立文件夹
+	'groupShareFolder'	=> "share",
 	
 	'desktopFolder'		=> 'desktop',	// 桌面文件夹别名
 	'versionType'		=> "A",			// 版本
 	'rootListUser'		=> 0,			// 组织架构根节点展示群组内用户
 	'rootListGroup'		=> 0,			// 组织架构根节点展示子群组
 	'csrfProtect'		=> 0, 		 	// 开启csrf保护
-	'currentVersion'	=> KOD_VERSION
+	'currentVersion'	=> KOD_VERSION,
+
+	'wallpageDesktop'	=> "1,2,3,4,5,6,7,8,9,10,11,12,13",
+	'wallpageLogin'		=> "2,3,6,8,9,11,12",
 );
 //初始化默认菜单配置
 $config['settingSystemDefault']['menu'] = array(
 	array('name'=>'desktop','type'=>'system','url'=>'index.php?desktop','target'=>'_self','use'=>'1'),
 	array('name'=>'explorer','type'=>'system','url'=>'index.php?explorer','target'=>'_self','use'=>'1'),
-	array('name'=>'editor','type'=>'system','url'=>'index.php?editor','target'=>'_self','use'=>'1')
+	// array('name'=>'editor','type'=>'system','url'=>'index.php?editor','target'=>'_self','use'=>'1')
 );
+if( strstr(I18n::defaultLang(),'zh') || strstr(I18n::getType(),'zh') ){
+	$config['settingSystemDefault']['newGroupFolder'] = "share,文档,图片资料,视频资料";
+	$config['settingSystemDefault']['newUserFolder'] = "我的文档,图片,视频,音乐";
+}
 
 //新用户初始化默认配置
 $config['settingDefault'] = array(
@@ -97,7 +111,8 @@ $config['editorDefault'] = array(
 	"softTab"		=> 1,
 	"displayChar"	=> 0,		//是否显示特殊字符
 	"fontFamily"	=> "Menlo",	//字体
-	"keyboardType"	=> "ace"	//ace vim emacs
+	"keyboardType"	=> "ace",	//ace vim emacs
+	"autoSave"		=> 0,		//自动保存
 );
 
 
@@ -152,8 +167,7 @@ $config['settingAll'] = array(
 	
 	'themeall'		=> "mac,win10,win7,metro,metro_green,metro_purple,metro_pink,metro_orange,alpha_image,alpha_image_sun,alpha_image_sky,diy",
 	'codethemeall'	=> "chrome,clouds,crimson_editor,eclipse,github,kuroir,solarized_light,tomorrow,xcode,ambiance,monokai,idle_fingers,pastel_on_dark,solarized_dark,twilight,tomorrow_night_blue,tomorrow_night_eighties",
-	'codefontall'	=> 'Source Code Pro,Consolas,Courier,DejaVu Sans Mono,Liberation Mono,Menlo,Monaco,Monospace',
-	'wallall'		=> "1,2,3,4,5,6,7,8,9,10,11,12,13"
+	'codefontall'	=> 'Source Code Pro,Consolas,Courier,DejaVu Sans Mono,Liberation Mono,Menlo,Monaco,Monospace'
 );
 
 
@@ -174,11 +188,11 @@ $config['roleSetting'] = array(
 	'setting'	=> array('set','systemSetting','phpInfo','systemTools'),
 	'fav'		=> array('add','del','edit'),
 
-	'systemMember'	=> array('get','add','edit','doAction'),
+	'systemMember'	=> array('get','add','edit','doAction','getByName'),
 	'systemGroup'	=> array('get','add','del','edit'),
 	'systemRole'	=> array('add','del','edit','roleGroupAction'),
 	//不开放此功能【避免扩展名修改，导致系统安全问题】
-	'pluginApp'		=> array('index','appList','changeStatus','setConfig','unInstall')
+	'pluginApp'		=> array('index','appList','changeStatus','setConfig','install','unInstall')
 );
 
 $config['pathRoleDefine'] = array(
@@ -186,7 +200,7 @@ $config['pathRoleDefine'] = array(
 		'list'	=> array('explorer.index','explorer.pathList','explorer.treeList','editor.index','pluginApp.to'),
 		'info'	=> array('explorer.pathInfo','explorer.search'),
 		'copy'	=> array('explorer.pathCopy'),
-		'preview'=>array('explorer.image','explorer.unzipList','explorer.fileProxy','explorer.officeView','editor.fileGet'),
+		'preview'=>array('explorer.image','explorer.unzipList','explorer.fileProxy','explorer.officeView','editor.fileGet','explorer.fileView'),
 		'download'=>array('explorer.fileDownload','explorer.zipDownload','explorer.fileDownloadRemove'),
 	),
 	'write' => array(

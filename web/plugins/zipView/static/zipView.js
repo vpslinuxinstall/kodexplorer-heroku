@@ -49,14 +49,14 @@ define(function(require, exports) {
 					treeNode.iconSkin = treeNode.tree_icon;
 
 					$("#" + treeNode.tId + "_span").addClass('name');
-					var tree_icon = treeNode.tree_icon;
+					var treeIcon = treeNode.tree_icon;
 					if(treeNode.ext){
-						tree_icon = treeNode.ext;
+						treeIcon = treeNode.ext;
 					}else if(!treeNode.tree_icon){
-						tree_icon = treeNode.type;
+						treeIcon = treeNode.type;
 					}
 					icoObj.before(switchObj)
-						.before('<span id="'+treeNode.tId +'_my_ico"  class="tree_icon button">'+core.iconSmall(tree_icon)+'</span>')
+						.before('<span id="'+treeNode.tId +'_my_ico"  class="tree_icon button">'+core.iconSmall(treeIcon)+'</span>')
 						.remove();
 
 					if(treeNode.ext!=undefined){//如果是文件则用自定义图标
@@ -68,10 +68,13 @@ define(function(require, exports) {
 						 + (spaceWidth * treeNode.level)+ "px'></span>";
 						switchObj.before(spaceStr);
 					}
-
-
+					var size = pathTools.fileSize(treeNode.size);
+					if(treeIcon == 'folder'){
+						//size = ' - ';
+						size = pathInfoData(treeNode).sizeFriendly;
+					}
 					var info = '<span class="time">'+date(LNG.time_type,treeNode.mtime)+'</span>';
-					info += '<span class="size">'+pathTools.fileSize(treeNode.size)+'</span>';
+					info += '<span class="size">'+size+'</span>';
 					info += '<span class="menu-item-parent icon-ellipsis-vertical"></span>';
 					$("#" + treeNode.tId + "_span").after(info);
 
@@ -119,13 +122,13 @@ define(function(require, exports) {
 					}
 					var item = tree[i];
 					tree[i] = {
-						name:core.pathThis(item.filename),
+						name:htmlEncode(htmlRemoveTags(core.pathThis(item.filename))),
 						filePath:item.filename,
 						path:currentFileUrl+'&index='+item.index+"&name=/"+urlEncode(item.filename),
 						isParent:!!(item.child),
 						type:item.folder?'folder':'file',
 						menuType:item['folder']?'menu-zip-list-folder':'menu-zip-list-file',
-						ext:core.pathExt(item.filename),
+						ext:htmlEncode(htmlRemoveTags(core.pathExt(item.filename))),
 						mtime:item.mtime,
 						index:item.index,
 						size:item.size,
@@ -138,7 +141,7 @@ define(function(require, exports) {
 					if(tree[i]['child']){
 						tree[i]['children'] = tree[i]['child'];
 						delete(tree[i]['child']);
-						clearCell(tree[i]['children']);
+						arguments.callee(tree[i]['children']);// == clearCell
 					}else{
 						delete(tree[i]['child']);
 					}
@@ -182,15 +185,14 @@ define(function(require, exports) {
 			var tree = [];
 			for(var key in items){
 				var cell = items[key];
-				var parent_key = core.pathFather(cell['filename']);
-
-				if(items[parent_key]) parent_key = core.pathFather(cell['filename']);
-				if(items[rtrim(parent_key,'/')]) parent_key = rtrim(parent_key,'/');
-				if (items[parent_key]){
-					if(!items[parent_key]['child']){
-						items[parent_key]['child'] = [];
+				var parentKey = core.pathFather(cell['filename']);
+				if(items[parentKey]) parentKey = core.pathFather(cell['filename']);
+				if(items[rtrim(parentKey,'/')]) parentKey = rtrim(parentKey,'/');
+				if (items[parentKey]){
+					if(!items[parentKey]['child']){
+						items[parentKey]['child'] = [];
 					}
-					items[parent_key]['child'].push(items[cell['filename']]);
+					items[parentKey]['child'].push(items[cell['filename']]);
 				}else{
 					var temp = items[cell['filename']];
 					if(temp){
@@ -311,6 +313,13 @@ define(function(require, exports) {
 				folderSizeCell.size += parseInt(node.size);
 			}
 		}
+		var archiveSize = function(data){
+			var totalSize = 0;
+			for (var i = 0; i < data.length; i++) {
+				totalSize += parseInt(data[i].size);
+			}
+			return totalSize;
+		}
 
 		var zipFileDownload = function(tree,node){
 			var filePath = tree.setting.filePath;
@@ -324,9 +333,10 @@ define(function(require, exports) {
 				//ext = 'unknow';
 			}
 			//文件太大，提示解压后
-			if(node.size >= 1024*1024*200){
+			if(node.size >= 1024*1024*300){
 				Tips.tips(LNG.zipview_file_big,'warning');
 				ext = 'unknow';
+				return;
 			}
 			kodApp.setLastOpenTarget($('#'+node.tId));
 			kodApp.open(node.path,ext,app);
@@ -394,7 +404,6 @@ define(function(require, exports) {
 			if(node.level == 0){
 				data.path = data.name;
 			}
-
 			if(node.type == 'folder'){
 				folderSizeCell = {fileCount:0,folderCount:0,size:0};
 				folderSize(node);
@@ -457,7 +466,7 @@ define(function(require, exports) {
 				}
 			});
 		}
-		var treeDataSort = function(treeData,isRoot){
+		var treeDataSort = function(treeData){
 			var fileList = [],folderList=[];
 			for (var i = 0; i < treeData.length; i++) {
 				treeData[i].name = treeData[i].name;
@@ -469,9 +478,6 @@ define(function(require, exports) {
 				}else{
 					fileList.push(treeData[i]);
 				}
-			}
-			if( isRoot ){//根目录不排序
-				return treeData;
 			}
 			folderList= folderList.sort(function (a, b) {
 				var a = a['name'];
@@ -486,13 +492,86 @@ define(function(require, exports) {
 			return folderList.concat(fileList);
 		};
 
-		var initData = function(title,data,path){
-			var treeData = makeTree(data);
-			var treeID   = 'folder-list-zip-'+UUID();
-			treeData = treeDataSort(treeData);
+		if( typeof(window.WorkerRun) == "undefined" ){
+			WorkerRun = function(work,param,callback,alias){
+				setTimeout(function(){
+					callback(work(param));
+				},0);
+				return;
+			}
+		}
+		//core做了混淆压缩，获取原代码失效;
+		var coreCode = {
+			pathThis:function(beforePath){
+				if(!beforePath || beforePath=='/') return '';
+				var path  = rtrim(this.pathClear(beforePath),'/');
+				var index = path.lastIndexOf('/');
+				var name  =  path.substr(index+1);
+	
+				//非服务器路径
+				if (name.search('fileProxy')==0) {
+					name = urlDecode(name.substr(name.search('&path=')));
+					var arr = name.split('/');
+					name = arr[arr.length -1];
+					if (name=='') name = arr[arr.length -2];
+				}
+				return name;
+			},
+			pathClear:function(beforePath){
+				if(!beforePath) return '';
+				var path = beforePath.replace(/\\/g, "/");
+				path = path.replace(/\/+/g, "/");
+				//path = rtrim(path,'/');
+				path = path.replace(/\.+\//g, "/");
+				return path;
+			},
+			//获取文件父目录
+			pathFather:function(beforePath){
+				var path = rtrim(this.pathClear(beforePath),'/');
+				var index = path.lastIndexOf('/');
+				return path.substr(0,index+1);
+			},
+			//获取路径扩展名
+			pathExt:function(beforePath){
+				var path = trim(beforePath,'/');
+				if(path.lastIndexOf('/')!=-1){
+					path = path.substr(path.lastIndexOf('/')+1);
+				}
+				if(path.lastIndexOf('.')!=-1){
+					return path.substr(path.lastIndexOf('.')+1).toLowerCase();
+				}else{
+					return path.toLowerCase();
+				}
+			}
+		};
+
+		var initData = function(path,data){
+			var title = urlDecode(core.pathThis(path));
+			var treeID = 'folder-list-zip-'+UUID();
 			initView(treeID,title,path);
-			Hook.trigger('Plugin.zipView.init');
 			bindMenu();
+			Hook.trigger('Plugin.zipView.init');
+			Tips.loading(LNG.loading);
+
+			//worker异步执行;
+			WorkerRun(function(data){
+				var treeData = makeTree(data);
+				treeData = treeDataSort(treeData);
+				return treeData;
+			},data,function(treeData){
+				initDataView(treeID,treeData,data,path);
+				Tips.close(LNG.success,true);
+			},[
+				'pathTools.strSort','trim','rtrim','ltrim','htmlEncode','htmlRemoveTags','urlEncode','urlDecode','$.isNumeric',
+				{'core.pathFather':coreCode.pathFather},
+				{'core.pathClear':coreCode.pathClear},
+				{'core.pathThis':coreCode.pathThis},
+				{'core.pathExt':coreCode.pathExt},
+				{makeTree:makeTree,treeDataSort:treeDataSort,currentFileUrl:currentFileUrl}
+			]);
+		}
+		var initDataView = function(treeID,treeData,data,path){
+			var title = urlDecode(core.pathThis(path));
 			treeData = {//根目录
 				name:title,
 				ext:core.pathExt(path),
@@ -503,10 +582,14 @@ define(function(require, exports) {
 				type:'folder',
 				path:'',
 				index:'-1',
+				size:archiveSize(data),
 				menuType:'menu-zip-list-folder'
 			}
 			$.fn.zTree.init($("#"+treeID),setting,treeData);
 			zTree = $.fn.zTree.getZTreeObj(treeID);
+			zTree.setting.filePath = path;
+			zTree.setting.fileUrl  = currentFileUrl;
+			
 			resetOdd(treeID);
 			pathInfoNode(zTree.getNodeByParam("index",'-1',null));
 		}
@@ -517,26 +600,22 @@ define(function(require, exports) {
 				$dlgItem.shake(3,20,80);
 				return;
 			}
-			var fileUrl = appOption.apiList+'&path='+urlEncode(path);
-			currentFileUrl = fileUrl;
-			if (typeof(G.sharePage) != 'undefined' && G.sid) {
-				kodApp.openUnknow(path);
-				return;
-			}
+			currentFileUrl = appOption.apiList+'&path='+urlEncode(path);
 			$.ajax({
-				url:fileUrl,
+				url:currentFileUrl,
 				dataType:'json',
 				beforeSend: function(){
 					Tips.loading(LNG.loading);
 				},
 				error:core.ajaxError,
 				success:function(data){
+					if(!data.code && data.data == '0'){
+						Tips.close("出错了！未识别的压缩文件格式；<br/> 请检查该文件是否为压缩文件或者是否损坏。",false);
+						return 
+					}
 					Tips.close(data);
 					if(data.code){
-						var name = urlDecode(core.pathThis(path));
-						initData(name,data.data,path);
-						zTree.setting.filePath = path;
-						zTree.setting.fileUrl  = fileUrl;
+						initData(path,data.data);
 					}else{//预览失败
 						kodApp.openUnknow(path,data.data);
 					}

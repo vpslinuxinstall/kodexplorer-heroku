@@ -2,6 +2,11 @@
 
 //changed by warlee --kodcloud
 //add pre name filter; PCLZIP_CB_PRE_FILE_NAME
+
+// zip64 support;
+//https://blog.csdn.net/a200710716/article/details/51644421
+//https://github.com/brokencube/ZipStream64/blob/14087549a4914bfc441a396ca02849569145a273/src/ZipStream.php#L808
+//https://pkware.cachefly.net/webdocs/APPNOTE/APPNOTE-6.2.0.txt
 //
 // --------------------------------------------------------------------------------
 // PhpConcept Library - Zip Module 2.8.2
@@ -3275,6 +3280,7 @@
     $p_info['index'] = $p_header['index'];
     $p_info['status'] = $p_header['status'];
     $p_info['crc'] = $p_header['crc'];
+    $p_info['offset'] = $p_header['offset'];//add by warlee;
 
     // ----- Return
     return $v_result;
@@ -3915,7 +3921,7 @@
             $v_buffer = @fread($this->zip_fd, $p_entry['compressed_size']);
             
             // ----- Decompress the file
-            $v_file_content = @gzinflate($v_buffer);
+            $v_file_content = gzinflate($v_buffer);
             unset($v_buffer);
             if ($v_file_content === FALSE) {
   
@@ -4248,7 +4254,7 @@
           $v_data = @fread($this->zip_fd, $p_entry['compressed_size']);
           
           // ----- Decompress the file
-          if (($p_string = @gzinflate($v_data)) === FALSE) {
+          if (($p_string = gzinflate($v_data)) === FALSE) {
               // TBC
           }
         }
@@ -4315,9 +4321,8 @@
     // ----- Check signature
     if ($v_data['id'] != 0x04034b50)
     {
-
       // ----- Error log
-      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, 'Invalid archive structure');
+      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, 'privReadFileHeader:Invalid archive structure');
 
       // ----- Return
       return PclZip::errorCode();
@@ -4333,7 +4338,7 @@
       $p_header['status'] = "invalid_header";
 
       // ----- Error log
-      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, "Invalid block size : ".strlen($v_binary_data));
+      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, "privReadFileHeader:Invalid block size : ".strlen($v_binary_data));
 
       // ----- Return
       return PclZip::errorCode();
@@ -4395,11 +4400,91 @@
 
     // ----- Set the status field
     $p_header['status'] = "ok";
-
+    $this->readZip64ExtraData($p_header);//add by warlee;
     // ----- Return
     return $v_result;
   }
   // --------------------------------------------------------------------------------
+  
+  //zip64 footer:extra data;add by warlee;
+  //64位文件头读取处理
+  function readZip64ExtraData(&$p_header){
+    $size   = filesize($this->zipname);
+    //不符合zip64 的大于4G的文件处理；溢出寻找标记头；
+    if(!$this->zip64 && $size >= 0xFFFFFFFF){
+      $zip  = fopen($this->zipname,'rb');
+      $from = $p_header['offset'];
+      while($from < $size){
+        fseek($zip,$from);
+        $sign = unpack('Vid',@fread($zip, 4));
+        //pr($from,$sign,0x04034b50);
+        if($sign['id'] == 0x04034b50){
+          $p_header['offset'] = $from;
+          break;
+        }else{
+          $from = $from + 0xFFFFFFFF + 1;//
+        }
+      }
+
+      //mac下压缩大于4G的文件
+      $from = 4+26+$p_header['compressed_size']+$p_header['filename_len']+$p_header['extra_len']+$p_header['comment_len']+20;
+      $add  = 0;
+      while($from < $size){
+        fseek($zip,$from);
+        $sign = unpack("Vid",@fread($zip, 4));
+        // pr($from,$p_header,str2hex(file_sub_str($this->zipname,$from,50)) );
+        if($sign['id'] == 0x04034b50 || $sign['id'] == 0x02014b50 || $sign['id'] == 0x06054b50){
+          $p_header['size'] += $add;
+          $p_header['compressed_size'] += $add;
+          break;
+        }else{
+          $add += 0xFFFFFFFF + 1;
+          $from += $add;//
+        }
+      }
+      fclose($zip);
+    }
+
+    if(!$this->zip64 || !$p_header['extra']){
+      return;
+    };
+    //pr(strlen($p_header['extra']),str2hex($p_header['extra']));
+    $p_extra_data = unpack('va/vb/Psize/Pcompressed_size/Poffset',$p_header['extra']);//2+2+8+8+8
+    if(strlen($p_header['extra']) < 28){
+        $p_extra_data = unpack('va/vb/Psize/Pcompressed_size',$p_header['extra']);
+        $p_extra_data['offset'] = 0;
+    }
+    if(strlen($p_header['extra']) < 20){//变长
+        $p_extra_data = unpack('va/vb/Psize',$p_header['extra']);
+        $p_extra_data['compressed_size'] = 0;
+        $p_extra_data['offset'] = 0;
+    }
+    
+    //01 为zip64扩展数据标记
+    if(!$p_extra_data || $p_extra_data['a'] != 0x01){
+        if($p_header['size'] >= 0xFFFFFFFF){//兼容非zip64 文件超过4G的文件情况
+          $this->privReadEndCentralDirZip4G($p_header);//校正偏移量;n*0xFFFFFFFF
+        }
+    	return;
+    }
+    if($p_header['offset'] == 0xffffffff){
+        //var_dump(str2hex($v_binary_data),$p_header,str2hex($p_header['extra']),$p_extra_data);
+    }
+    if($p_header['compressed_size'] == 0xffffffff && $p_extra_data['compressed_size'] > 0 ){
+        $p_header['compressed_size'] = $p_extra_data['compressed_size'];
+    }
+    //适配特殊情况; 顺序适配
+    if($p_header['offset'] == 0xffffffff){
+        if( $p_extra_data['offset'] >0 && $p_extra_data['offset']< 1024*1024*1024*1000){
+            $p_header['offset'] = $p_extra_data['offset'];
+        }else if($p_extra_data['size'] >= 0xffffffff){
+            $p_header['offset'] = $p_extra_data['size'];
+        }
+    }
+    if($p_header['size'] == 0xffffffff){
+        $p_header['size'] = $p_extra_data['size'];
+    }
+  }
 
   // --------------------------------------------------------------------------------
   // Function : privReadCentralFileHeader()
@@ -4420,7 +4505,7 @@
     {
 
       // ----- Error log
-      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, 'Invalid archive structure');
+      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, 'privReadCentralFileHeader:Invalid archive structure');
 
       // ----- Return
       return PclZip::errorCode();
@@ -4436,7 +4521,7 @@
       $p_header['status'] = "invalid_header";
 
       // ----- Error log
-      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, "Invalid block size : ".strlen($v_binary_data));
+      PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, "privReadCentralFileHeader:Invalid block size : ".strlen($v_binary_data));
 
       // ----- Return
       return PclZip::errorCode();
@@ -4500,8 +4585,7 @@
       //$p_header['external'] = 0x41FF0010;
       $p_header['external'] = 0x00000010;
     }
-
-
+    $this->readZip64ExtraData($p_header);//add by warlee;
     // ----- Return
     return $v_result;
   }
@@ -4661,7 +4745,7 @@
 
     // ----- Extract the values
     $v_data = unpack('vdisk/vdisk_start/vdisk_entries/ventries/Vsize/Voffset/vcomment_size', $v_binary_data);
-
+    
     // ----- Check the global size
     if (($v_pos + $v_data['comment_size'] + 18) != $v_size) {
 
@@ -4679,7 +4763,6 @@
       return PclZip::errorCode();
 	  }
     }
-
     // ----- Get comment
     if ($v_data['comment_size'] != 0) {
       $p_central_dir['comment'] = fread($this->zip_fd, $v_data['comment_size']);
@@ -4693,6 +4776,16 @@
     $p_central_dir['size'] = $v_data['size'];
     $p_central_dir['disk'] = $v_data['disk'];
     $p_central_dir['disk_start'] = $v_data['disk_start'];
+    
+    //add by warlee; zip64 supports
+    //vdisk/vdisk_start/vdisk_entries/ventries/Vsize/Voffset/vcomment_size
+    if($v_data['offset'] == 0xFFFFFFFF){
+        return $this->privReadEndCentralDirZip64($p_central_dir,$v_data);
+    }
+    if($v_size >= 0xFFFFFFFF){
+      //兼容非zip64 压缩超过4G的文件情况
+      return $this->privReadEndCentralDirZip4G($p_central_dir);
+    }
 
     // TBC
     //for(reset($p_central_dir); $key = key($p_central_dir); next($p_central_dir)) {
@@ -4701,6 +4794,62 @@
     // ----- Return
     return $v_result;
   }
+  //超过4G的文件；通过溢出查找偏移位置
+  function privReadEndCentralDirZip4G(&$p_central_dir){
+    $zip = fopen($this->zipname,'rb');
+    $from   = $p_central_dir['offset'];
+    $size   = filesize($this->zipname);
+    while($from < $size){
+      fseek($zip,$from);
+      $sign = unpack('Vid',@fread($zip, 4));
+      //debug_out($from,$sign,0x02014b50);
+      if($sign['id'] == 0x02014b50){
+        $p_central_dir['offset'] = $from;
+        break;
+      }else{
+        $from = $from + 0xFFFFFFFF + 1;//
+      }
+    }
+    fclose($zip);
+    return 1;
+  }
+  
+    // zip64 support;
+    //https://blog.csdn.net/a200710716/article/details/51644421
+    //https://github.com/brokencube/ZipStream64/blob/14087549a4914bfc441a396ca02849569145a273/src/ZipStream.php#L808
+    //https://pkware.cachefly.net/webdocs/APPNOTE/APPNOTE-6.2.0.txt
+    function privReadEndCentralDirZip64(&$p_central_dir,$cdr_data){
+        $this->zip64 = true;        
+        //56 [zip64 end of central directory record]  
+            //Vzip64_cdr_eof/Pblow_offset/vversion/vversion_un/Vdisk/Vdisk_start/Pdisk_entries/Pentries/Psize/Poffset
+        //20 [zip64 end of central directory locator] 
+            //Vzip64_cdr_loc_flag/Vdisk_num/Pcdr_offset/Vtotal_disk 
+        //22 [end of central directory record]        
+            //Vzip_cdr_eof/vdisk/vdisk_start/vdisk_entries/ventries/Vsize/Voffset/vcomment_size
+        $offset_back = 56+20+22;
+        $old_pose = ftell($this->zip_fd);
+        fseek($this->zip_fd,$old_pose-$cdr_data['comment_size']-$offset_back);
+        $v_bin  = fread($this->zip_fd, 56);
+        $v_data  = unpack('Vzip64_cdr_eof/Pblow_offset/vversion/vversion_un/Vdisk/Vdisk_start/Pdisk_entries/Pentries/Psize/Poffset', $v_bin);
+        if($v_data['zip64_cdr_eof'] != 0x06064b50){
+            PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, "Invalid End of Zip64 Central Dir Record error:".json_encode($v_data));
+            return PclZip::errorCode();
+        }
+        
+        $loc_bin   = fread($this->zip_fd,20);
+        $loc_data  = unpack('Vzip64_cdr_loc_flag/Vdisk_num/Pcdr_offset/Vtotal_disk', $loc_bin);
+        if($loc_data['zip64_cdr_loc_flag'] != 0x07064b50){
+            PclZip::privErrorLog(PCLZIP_ERR_BAD_FORMAT, "Invalid End of Zip64 central directory locator error:".json_encode($loc_data));
+            return PclZip::errorCode();
+        }
+        $p_central_dir['entries'] = $v_data['entries'];
+        $p_central_dir['disk_entries'] = $v_data['disk_entries'];
+        $p_central_dir['offset'] = $v_data['offset'];
+        $p_central_dir['size'] = $v_data['size'];
+        fseek($this->zip_fd,$old_pose);
+        return 1;
+    }
+  
   // --------------------------------------------------------------------------------
 
   // --------------------------------------------------------------------------------

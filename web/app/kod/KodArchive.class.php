@@ -10,14 +10,15 @@
 define('ARCHIVE_LIB',dirname(__FILE__).'/archiveLib/');
 define('PCLZIP_TEMPORARY_DIR',TEMP_PATH);
 define('PCLTAR_TEMPORARY_DIR',TEMP_PATH);
+define('PCLZIP_SEPARATOR',';@@@,');//压缩多个文件，组成字符串分割
 mk_dir(TEMP_PATH);
 
-require ARCHIVE_LIB.'pclerror.lib.php';
-require ARCHIVE_LIB.'pcltrace.lib.php';
-require ARCHIVE_LIB.'pcltar.lib.php';
-require ARCHIVE_LIB.'pclzip.class.php';
-require ARCHIVE_LIB.'kodRarArchive.class.php';
-
+require_once ARCHIVE_LIB.'pclerror.lib.php';
+require_once ARCHIVE_LIB.'pcltrace.lib.php';
+require_once ARCHIVE_LIB.'pcltar.lib.php';
+require_once ARCHIVE_LIB.'pclzip.class.php';
+require_once ARCHIVE_LIB.'kodRarArchive.class.php';
+require_once ARCHIVE_LIB.'kodZipArchive.class.php';
 
 class KodArchive {
 	/**
@@ -86,17 +87,21 @@ class KodArchive {
 				$result = $appResult['data'];
 			}
 		}else{//默认zip
-			$zip = new PclZip($file);
-			$result = $zip->listContent();
+            if(kodZipArchive::support('list')){
+                $result = kodZipArchive::listContent($file);
+            }else{
+                $zip = new PclZip($file);
+                $result = $zip->listContent();
+            }
 		}
-		
 		if($result){
 			//编码转换
 			$charset = unzip_charset_get($result);
-			$output  = $output && $charset != 'utf-8' && function_exists('iconv');
+			$output  = $output && function_exists('iconv');
 			for ($i=0; $i < count($result); $i++) {
 				//不允许相对路径
 				$result[$i]['filename'] = str_replace(array('../','..\\'),"_",$result[$i]['filename']);
+				// $charset = get_charset($result[$i]['filename']);
 				if($output){
 					$result[$i]['filename'] = iconv_to($result[$i]['filename'],$charset,'utf-8');
 					unset($result[$i]['stored_filename']);
@@ -163,8 +168,10 @@ class KodArchive {
 			}
 			//TrDisplay();exit;
 			return array('code'=>$result,'data'=>PclErrorString(true));
-		}else if( self::checkIfType($ext,'rar') ){
+		}else if( self::checkIfType($ext,'rar')){ // || $ext == 'zip' 
 			return kodRarArchive::extract($file,$dest,$ext,$partName);
+		}else if(kodZipArchive::support('extract')){
+            return kodZipArchive::extract($file,$dest,$partName);
 		}else{
 			$zip = new PclZip($file);
 			//解压内部的一部分，按文件名或文件夹来
@@ -251,40 +258,25 @@ class KodArchive {
 		mk_dir($temp);
 		touch(TEMP_PATH.'archivePreview/index.html');
 		$newFile = $temp.md5($file.$index.$byName);
-		if($index == 'byname' && $byName){
-			if(file_exists($newFile)){
-				file_put_out($newFile,$download,get_path_this($byName));
-				return;
-			}
-			$zip  = new PclZip($file);
-			$filenameOutput = get_path_this($byName);
-			$outFile = unzip_filter_ext($temp.$filenameOutput);
-			$result = $zip->extract(
-				PCLZIP_OPT_PATH,$temp,
-				PCLZIP_CB_PRE_FILE_NAME,'unzip_pre_name',
-				PCLZIP_OPT_REMOVE_PATH,get_path_father($byName),
-				PCLZIP_OPT_BY_NAME,$byName);
-		}else{
-			$partName = '';
-			$result = self::extract($file, $temp,$index,$partName);
-			if(is_array($partName)){//不能是数组——文件夹
-				show_json('unzip preview folder error!');
-			}
-			if(file_exists($newFile)){
-				file_put_out($newFile,$download,get_path_this($partName));
-				return;
-			}
-			//$partName 压缩文件原名；初始编码；转为当前文件系统编码
-			$partName = unzip_pre_name($partName);
-			$filenameOutput = get_path_this($partName);
-			$outFile = unzip_filter_ext($temp.$filenameOutput);
-			if(!$result['code']){
-				show_json($result['data'],false);
-			}
+		$partName = '';//引用传值,传入处理
+		$result = self::extract($file, $temp,$index,$partName);
+		if(is_array($partName)){//不能是数组——文件夹
+			show_json('unzip preview folder error!',false);
+		}
+		if(file_exists($newFile)){
+			file_put_out($newFile,$download,get_path_this($partName));
+			return;
+		}
+		//$partName 压缩文件原名；初始编码；转为当前文件系统编码
+		$partName = unzip_pre_name($partName);
+		$filenameOutput = get_path_this($partName);
+		$outFile = unzip_filter_ext($temp.$filenameOutput);
+		if(!$result['code']){
+			show_json($result['data'],false);
 		}
 		//debug_out($partName,$file,$outFile,$byName);
 		if(!file_exists($outFile)){
-			show_json('unzip error!');
+			show_json('unzip error!',false);
 		}
 		@rename($outFile,$newFile);
 		if(!file_exists($newFile)){
@@ -303,6 +295,9 @@ class KodArchive {
 		$ext = get_path_ext($file);
 		$result = false;
 		if( self::checkIfType($ext,'zip') ){
+		    if(kodZipArchive::support('add')){
+                return kodZipArchive::create($file,$files);
+            }
 			$archive = new PclZip($file);
 			foreach ($files as $key =>$val) {
 				$val = str_replace('//','/',$val);
@@ -321,11 +316,9 @@ class KodArchive {
 			}
 		}else if( self::checkIfType($ext,'tar') ){
 			//TrOn(10);
-			$test = array($files);
 			foreach ($files as $key =>$val) {
 				$val = str_replace('//','/',$val);
 				$removePathPre = _DIR_CLEAR(get_path_father($val));
-				$test[] = array($val,$removePathPre);
 				if($key == 0){
 					$result = PclTarCreate($file,array($val), $ext,null, $removePathPre);
 					continue;

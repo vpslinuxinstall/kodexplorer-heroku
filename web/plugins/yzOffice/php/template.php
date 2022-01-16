@@ -3,8 +3,8 @@
 	<meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1, user-scalable=no" />
 	<meta charset="utf-8">
 	<link rel="stylesheet" href="<?php echo STATIC_PATH;?>style/common.css" type="text/css">
-	<link rel="stylesheet" href="<?php echo STATIC_PATH;?>style/font-awesome/css/font-awesome.css" type="text/css">
-	<title><?php echo $fileName;?></title>
+	<link rel="stylesheet" href="./static/style/font-awesome/css/font-awesome.css">
+	<title><?php echo clear_html($fileName);?></title>
 	<style>
 		body {margin: 0;font-family: "Helvetica Neue Light", "Segoe UI Semilight", sans-serif;}
 		.infoButtonPrint{
@@ -68,7 +68,7 @@
 	</div>
 	<div id="MyViewerDiv"></div>
 </body>
-<script src="<?php echo STATIC_PATH;?>js/lib/jquery-1.8.0.min.js"></script>
+	<script src="<?php echo STATIC_PATH;?>js/lib/jquery-1.8.0.min.js"></script>
 	<script src="<?php echo STATIC_PATH;?>js/lib/jquery-lib.js"></script>
 	<script src="<?php echo STATIC_PATH;?>js/lib/util.js"></script>
 
@@ -82,7 +82,7 @@
 			"yzOffice.Main.convert":"<?php echo LNG('yzOffice.Main.convert');?>",
 			"yzOffice.Main.transferAgain":"<?php echo LNG('yzOffice.Main.transferAgain');?>"
 		};
-		var path     = '<?php echo $this->in["path"];?>';
+		var path     = '<?php echo clear_quote($this->in["path"]);?>';
 		var apiBase  = "<?php echo $this->pluginApi;?>";//不能含有index.php
 		var selfHost = '<?php echo $this->pluginHost;?>';
 		var cacheFile= '<?php echo $config["cacheFile"];?>';
@@ -152,7 +152,7 @@
 			}
 			clearInterval(repeatTimer);
 			taskStatus();
-			repeatTimer = setInterval(taskStatus,600);
+			repeatTimer = setInterval(taskStatus,1000);
 		};
 		var loadSuccess = function(data){
 			window.location.reload();

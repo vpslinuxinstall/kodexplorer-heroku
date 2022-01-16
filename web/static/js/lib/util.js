@@ -15,7 +15,13 @@ var timeFloat = function(){
 	var time = (new Date()).valueOf();
 	return time/1000;
 }
-var urlEncode = encodeURIComponent;
+var urlEncode = function(str){
+	try {
+		return encodeURIComponent(str);
+	} catch (e) {
+		return str;
+	}
+};
 var urlDecode = function(str){
 	try {
 		return decodeURIComponent(str);
@@ -35,6 +41,16 @@ var round = function(val,point){//随机数
 var roundFromTo = function(from,to){//生成from到to的随机数；整数，包含to不包含from
 	var react = to - from;
 	return Math.ceil(Math.random()*react+from);
+}
+var roundString = function(len){
+	var result = "";
+	var charArr = '01234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+	len = len || 5;
+	for (var i = 0; i < len; i++) {
+		var index = roundFromTo(0,charArr.length) - 1;
+		result += charArr.charAt(index);
+	}
+	return result;
 }
 var md5 = function(str){
 	return CryptoJS.MD5(str).toString();
@@ -82,8 +98,16 @@ var quoteEncode = function(str){
 	str = str.replace(/(['"])/g,'\\$1');
 	return str;
 }
+var strAdd=function(str,add){
+	add=add==undefined?1:add;
+	var res='';
+	for(var i=0;i<str.length;i++){
+		res+=String.fromCharCode((str[i]).charCodeAt()+add);
+	}
+	return res;
+}
 var isWap = function(){
-	if(navigator.userAgent.match(/(iPhone|iPod|Android|ios)/i)){
+	if(navigator.userAgent.match(/(iPhone|iPod|Android|ios|MiuiBrowser)/i)){
 		return true;
 	}
 	return false;
@@ -252,7 +276,9 @@ var Cookie = (function(){
 		var cookieArray=document.cookie.split("; ");
 		for (var i=0;i<cookieArray.length;i++){
 			var arr=cookieArray[i].split("=");
-			data[arr[0]] = unescape(arr[1]);
+			if( typeof(data[arr[0]]) == 'undefined' ){
+				data[arr[0]] = unescape(arr[1]);
+			}
 		}
 		return data;
 	}
@@ -300,13 +326,16 @@ var LocalData = (function(){
 		}
 	}
 	var support = function(){
-		try{
-			if(window.localStorage){
-				return true;
-			}else{
-				return false;
-			}	
-		}catch(e){return false;}
+		try { 
+			var supported = !!window.localStorage;
+			if (supported) { 
+				window.localStorage.setItem("storage","");
+				window.localStorage.removeItem("storage");
+			}
+			return supported;
+		}catch(err) { 
+			return false;
+		}
 	}
 	var get = function(key){//没有key代表获取所有
 		key = makeKey(key);
@@ -355,7 +384,9 @@ var LocalData = (function(){
 		if(result === null || result == undefined || result == ''){
 			return false;
 		}else{
-			return jsonDecode(base64Decode(result));
+			try{
+				return jsonDecode(base64Decode(result));
+			}catch(e){return {};}			
 		}
 	}
 	var clear = function(){
@@ -421,13 +452,13 @@ function Queen(maxLength,identify){
 			return [];
 		}
 		if(list == undefined){
-			return LocalData.getConfig(identify);
+			return LocalData.getConfig(identify) || [];
 		}else{
 			return LocalData.setConfig(identify,list);
 		}
 	}
 	var queenList = data();//本地存储初始化
-	if(!queenList){
+	if(!_.isArray(queenList)){
 		queenList = [];
 	}
 	var index = queenList.length - 1;
@@ -617,78 +648,86 @@ var pathTools = (function(){
 		}
 	};
 
-	var strSortChina = function(a,b){
-		var arr = '0123456789零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟万';//
-		for (var i=0;i<Math.max(a.length,b.length);i++){
-			if (a.charAt(i) != b.charAt(i)){
-				var aIndex = arr.indexOf(a.charAt(i));
-				var bIndex = arr.indexOf(b.charAt(i));
-				if(aIndex!=-1 && bIndex!=-1){//有该字符
-					if(aIndex>bIndex){
-						return 1;
-					}else if(aIndex<bIndex){
-						return -1;
-					}else{
-						return 0;
-					}
-				}else{//字符比较
-					if(a.charAt(i)>b.charAt(i)){
-						return 1;
-					}else if(a.charAt(i)<b.charAt(i)){
-						return -1;
-					}else{
-						return 0;
-					}
-				}
-			}
-		}
-		return 0;
-	}
-	//字符串排序函数 ；222>111,bbb>aaa; bbb(1).txt>bbb(0).txt [bbb(100).txt>bbb(55).txt]
-	//https://github.com/overset/javascript-natural-sort/blob/master/speed-tests.html
+	/**
+	 * 5000项
+	 * sort:a==b?0:(a>b?1:-1)			0.004s
+	 * pathTools.strSort(a,b) 			5.0s
+	 * a.localeCompare(b)				6.0s
+	 * 
+	 * ['3',"1",'2','21','我','月',"二", "四","一","三",'安','巴士','秦','a','b','z','1.a','2.b','3.d','23.f','1语文']
+	 * ['5a','1a','10a','11a'] 		按数字大小排序
+	 * ['1.595','1.52e7','1.58e3']	科学技术法排序
+	 * ['B1','a1','b2f',"A2"]		按大小写无关排序，小写小于大写; ==> ['a1',"A2",'b2f','B1']
+	 * 
+	 * 参考
+	 * https://github.com/overset/javascript-natural-sort/blob/master/naturalSort.js
+	 * https://github.com/sxei/pinyinjs
+	 * 
+	 * 耗时：暂不加入如下排序支持
+	 * 时间戳排序;耗时操作 为兼容国外时间  ['10-12-2008','10-11-2008','10-11-2007','10-12-2007']
+	 * var aDate = (new Date(a)).getTime(),bDate = aDate ? (new Date(b)).getTime() : null;
+	 * if (bDate){return aDate==bDate?0:(aDate>bDate?1:-1);}
+	 */
 	var strSort = function(a,b){
-		if(a==undefined || b==undefined){
-			return 0;
+		var isNumeric = function(str){
+			return !isNaN(parseFloat(str)) && isFinite(str);
 		}
-		if(typeof(a) == "number" && typeof(b) == "number"){
-			return a>b?1:(a==b?0:-1);
-		}
-
-		var re = /([0-9\.]+)/g,	// /(-?[0-9\.]+)/g,  负数 2016-11-09 2016-11-10歧义
-			x = a.toString().toLowerCase() || '',
-			y = b.toString().toLowerCase() || '',
-			nC = String.fromCharCode(0),
-			xN = x.replace( re, nC + '$1' + nC ).split(nC),
-			yN = y.replace( re, nC + '$1' + nC ).split(nC),
-			xD = (new Date(x)).getTime(),
-			yD = xD ? (new Date(y)).getTime() : null;
-
-		if ( yD ){//时间戳排序
-			if ( xD < yD ){
-				return -1;
-			}else if ( xD > yD ){
-				return 1;
-			}
-		}
-		for( var cLoc = 0, numS = Math.max(xN.length, yN.length); cLoc < numS; cLoc++ ) {
-			oFxNcL = parseFloat(xN[cLoc]) || xN[cLoc];
-			oFyNcL = parseFloat(yN[cLoc]) || yN[cLoc];
-			if(oFxNcL== oFyNcL){
-				continue;
-			}
-			if(typeof(oFxNcL) == 'string' && typeof(oFyNcL)== 'string'){
-				//自定义字符大小顺序
-				var resultCurrent = strSortChina(oFxNcL,oFyNcL);
-				if(resultCurrent!=0){
-					return resultCurrent;
-				}
-			}else{
-				if (oFxNcL < oFyNcL){
-					return -1;
-				}else if (oFxNcL > oFyNcL){
-					return 1;
+		var substrNumber = function(str,from){
+			res = '';
+			for (var i = from; i < str.length; i++) {
+				var char = str.charAt(i);
+				if(isNumeric(char) || char == '.'){
+					res += char+'';
+				}else{
+					break;
 				}
 			}
+			return parseFloat(res);
+		}
+		
+		if(isNumeric(a) && isNumeric(b)){
+			a = parseFloat(a);
+			b = parseFloat(b);
+			return a==b?0:(a>b?1:-1);
+		}
+		if(a == undefined || b == undefined) return 0;
+		var arr = '零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟万';//
+		for (var i=0;i<Math.max(a.length,b.length);i++){
+			var aChar = a.charAt(i),bChar = b.charAt(i);
+			if(aChar == bChar && !isNumeric(aChar) ) continue; //相等且不为数字
+			//连续数字时比较数值;
+			if(isNumeric(aChar) && isNumeric(bChar)){
+				var aNum = substrNumber(a,i),bNum = substrNumber(b,i);
+				if(aNum==bNum){
+					i += aNum.toString().length-1;
+					continue;
+				}
+				return aNum>bNum?1:-1;
+			}
+			if(aChar == bChar) continue;
+			
+			//字符和汉字(字符小于汉字)、字符和字符(小写英文小于大写英文,a<A<b<B )
+			if( aChar.charCodeAt() < 255 || bChar.charCodeAt() < 255){
+				if( aChar.charCodeAt() < 255 && bChar.charCodeAt() < 255){
+					// B>b>A>a;自行实现，避免localeCompare比较不同平台不一致问题 
+					var aCharI = aChar.toLowerCase(),bCharI = bChar.toLowerCase();
+					if(aCharI == bCharI) return aChar>bChar?-1:1;//ansii需要反置
+					return aCharI>bCharI?1:-1;
+				}
+				return aChar>bChar?1:-1;
+			}
+
+			//纯中文情况
+			var aIndex = arr.indexOf(aChar);
+			var bIndex = arr.indexOf(bChar);
+			if( aIndex!=-1 && bIndex!=-1 ){//中文数字
+				return (aIndex>bIndex?1:-1);
+			}
+			//中文数字排在所有汉字前
+			if(aIndex !=-1 ) return -1;
+			if(bIndex !=-1 ) return 1;
+			return aChar.localeCompare(bChar);//中文按拼音排序; 不支持词语多音字处理:北京/长沙/长高/重量/重庆
+			// strToPinyin(aChar)>strToPinyin(bChar)?1:-1;
 		}
 		return 0;
 	}
@@ -699,7 +738,6 @@ var pathTools = (function(){
 		pathThis:pathThis
 	}
 })();
-
 
 
 //是否在数组中。
@@ -828,9 +866,11 @@ var Tips =  (function(){
 		msg+= "&nbsp;&nbsp; <img src='"+staticPath+"images/common/loading_circle.gif'/>";
 
 		var self = _init(true,msg,code);
-		self.stop(true,true)
+		try{
+			self.stop(true,true)
 			.css({'opacity':'0','top':-self.height()})
 			.animate({opacity:1,top:0},inTime,0);
+		}catch(e){};
 	};
 	var close = function(msg,code){
 		if (typeof(msg) == 'object'){
@@ -866,6 +906,17 @@ var Tips =  (function(){
 		close:close
 	}
 })();
+
+if($.artDialog){
+	$.artDialog.loading = function(msg){
+		msg = msg || LNG.loading || 'loading...';
+		return $.artDialog({
+			title:false,
+			content:"<div style='text-align:center;line-height:1.6em;'><img src='./static/images/common/loading.gif'/><br/>"+msg+"</div>",
+			padding:'10px 0px'
+		});
+	}
+}
 
 var Title = (function(){
 	var oldTitle = document.title;
@@ -1155,7 +1206,31 @@ var MaskView =  (function(){
 	}
 })();
 
-
+(function(w){
+    if(/msie|applewebkit.+safari/i.test(w.navigator.userAgent)){
+        var _sort = Array.prototype.sort;
+        Array.prototype.sort = function(fn){
+            if(!!fn && typeof fn === 'function'){
+                if(this.length < 2) return this;
+                var i = 0, j = i + 1, l = this.length, tmp, r = false, t = 0;
+                for(; i < l; i++){
+                    for(j = i + 1; j < l; j++){
+                        t = fn.call(this, this[i], this[j]);
+                        r = (typeof t === 'number' ? t : !!t ? 1 : 0) > 0 ? true : false;
+                        if(r){
+                            tmp = this[i];
+                            this[i] = this[j];
+                            this[j] = tmp;
+                        }
+                    }
+                }
+                return this;
+            } else {
+                return _sort.call(this);
+            }
+        };
+    }
+})(window);
 //textarea自适应高度
 (function($){
 	$.fn.exists = function(){
@@ -1397,6 +1472,7 @@ var MaskView =  (function(){
 		};
 		var port = result.port ? ':'+result.port:'';
 		result.url = result.protocol + '://' + result.host + port + result.path + result.query;
+		result.origin = result.protocol + '://' + result.host + port;
 		return result;
 	}
 
@@ -1430,7 +1506,7 @@ var MaskView =  (function(){
 	$.addStyle = function(cssText){
 		var head = document.getElementsByTagName('head')[0] ||document.documentElement;
 		var id = 'add-style-css-text';
-		var element = $('#'+id).get(0);
+		var element = document.getElementById(id);
 		if(!element){
 			element = document.createElement('style');
 			element.id = 'add-style-css-text';
@@ -1457,6 +1533,39 @@ var MaskView =  (function(){
 			document.body.removeChild(ifr);
 		}
 	}
+
+	//将html内容添加到沙盒中，不破坏父页面样式及方法
+	$.iframeHtml = function($parent,content){
+		var tpl = '<iframe src="about:blank" style="width:100%;height:100%;border:0px;display:block!important;"></iframe>';
+		$($parent).html(tpl);
+		var iframeDom = $($parent).find('iframe').get(0);
+		if (!iframeDom.tagName || "iframe" != iframeDom.tagName.toLowerCase()) {
+			$($parent).html(content);
+			return;
+		}
+		var dom = iframeDom.contentWindow.document;
+		try {
+			dom.open(), dom.write(content), dom.close()
+		} catch (d) {
+			$($parent).html(content);
+		}
+	}
+	$.printLink = function(link){
+		var $iframe = $('#page-print');
+		if ($iframe.length > 0) {
+			$iframe.remove();
+		}
+		$('<iframe id="page-print" style="opacity:0.01;width:1px;height:1px;z-index:-1;"></iframe>').appendTo('body');
+		var iframe = $('#page-print').get(0);
+		iframe.onload = function() {
+			iframe.contentWindow.focus();
+			iframe.contentWindow.print();
+			iframe.contentWindow.blur();
+			window.focus();
+		};
+		if (link) iframe.src = link;
+	}
+
 	//是否为ie ie6~11
 	$.isIE = function(){
 		return !!(window.ActiveXObject || "ActiveXObject" in window);
@@ -1467,6 +1576,38 @@ var MaskView =  (function(){
 		}
 		return false;
 	}
+	$.isMobleSafari = function(){
+		var ua = navigator.userAgent;
+		// IOS系统;不是Chrome;开头必须为Mozilla;结尾需为：Safari/xxx.xx
+		if (/ OS \d/.test(ua)  && 
+			!~ua.indexOf('CriOS') &&
+			!ua.indexOf('Mozilla') &&
+			/Safari\/[\d\.]+$/.test(ua)
+			) {
+			return true;
+		}
+		return false;
+	}
+	
+	var u = navigator.userAgent;
+	$.browserIS = {
+		ie:!!(window.ActiveXObject || "ActiveXObject" in window), //ie;ie6~11
+		ie8:this.ie && parseInt($.browser.version) <=8,//ie8
+
+		trident: u.indexOf('Trident') > -1, //IE内核 
+		presto: u.indexOf('Presto') > -1, //opera内核 
+		webKit:u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核 
+		gecko:u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1,//火狐内核 
+		mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端  
+		ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端  
+		android: u.indexOf('Android') > -1 || u.indexOf('Adr') > -1, //android终端 
+		iPhone: u.indexOf('iPhone') > -1 , //是否为iPhone
+		iPad: u.indexOf('iPad') > -1, //是否iPad 
+		webApp: u.indexOf('Safari') == -1, //是否web应该程序，没有头部与底部 
+		weixin: u.indexOf('MicroMessenger') > -1, //是否微信
+		qq: u.match(/\sQQ/i) == " qq" //是否QQ  
+	};
+
 
 	$.supportUploadFolder = function(){
 		if(isWap()){
@@ -1542,6 +1683,16 @@ var MaskView =  (function(){
 				});
 			});
 			return this;
+		},
+		offsetWindow:function(){
+			var info = $(this).get(0).getBoundingClientRect();
+			return {
+				top:info.top,
+				left:info.left,
+
+				bottom:$(window).height() - info.top - $(this).outerHeight(),
+				right: $(window).width() - info.left - $(this).outerWidth(),
+			}
 		},
 
 		myDbclick:function(callback){
@@ -1863,6 +2014,103 @@ var MaskView =  (function(){
 
 })(jQuery);
 
+/**
+ * worker运行代码
+ * https://www.html5rocks.com/zh/tutorials/workers/basics/#toc-usecases
+ * 
+ * work:   function|string    异步执行的代码;必须为函数或者函数的代码; 
+ *         worker只支持访问navigator,location,XMLHttpRequest,setTimeout
+ * 
+ * param:  work函数传入的参数;
+ * callback: function  回调函数
+ * alias:   对象或数组;work中的依赖；通过源码方式注入
+ *		['trim','core.pathFather','core.pathClear',{'urlEncode':window.urlEncode,'rtrim':0}] //数组时字符串对应window能访问的函数
+ *		{'urlEncode':window.urlEncode,'rtrim':0};// 值为真时则 value为value.toString();
+
+eg:
+var fab = function(n){
+	return n<2?n:arguments.callee(n-1)+arguments.callee(n-2);
+}
+WorkerRun(fab,20,console.log);
+
+WorkerRun(function(n){
+	console.log(n);
+	return core.pathFather(n);
+},'/a/b//c/d/e.txt',function(data){
+	console.log(222,data);
+},['trim','rtrim','core.pathFather','core.pathClear']);
+
+ */
+
+var WorkerRun = function(work,param,callback,alias){
+	if( typeof(Worker) == "undefined" ){
+		setTimeout(function(){
+			callback(work(param));
+		},0);
+		return;
+	}
+	
+	//生成worker内部依赖的代码;
+	var makeAliasCode = function(obj){
+		if(!obj) return "";
+		var source = "";
+		var set = {};
+		if( !obj.hasOwnProperty(0) ){//全为对象
+			obj = [obj];
+		}
+		var makeItem = function(key,value){
+			var property = window;
+			var keyArr = key.split('.');
+			if(typeof(value) == 'string'){
+				value = '"'+value+'"';//支持引入变量
+			}else if(typeof(value) == 'object'){
+				value = JSON.stringify(value);
+			}
+			for (var i = 0; i < keyArr.length; i++) {
+				property = property[keyArr[i]];
+				var objKey = key.split('.').splice(0,i).join('.');
+				if(objKey && !set[objKey]){
+					set[objKey] = true;
+					source += 'var '+objKey+'={};\n';
+				}
+				if(i == keyArr.length - 1){
+					var needVar = key.indexOf('.') == -1?"var ":"";
+					value = value || property;				
+					source += needVar+key+'='+value.toString()+';\n';
+				}
+			}
+		}
+		for (var i=0;i<=obj.length;i++) {
+			var item = obj[i];
+			if(typeof(item) == 'string'){
+				makeItem(item);
+				continue;
+			}
+			for (var key in item) {
+				makeItem(key,item[key]);
+			}
+		}
+		return source;
+	};
+
+	var source = (typeof(work) == 'function') ? work.toString():work;
+	source  = "var workFunction = ("+source+");\n";
+	source += makeAliasCode(alias);
+	source += 'onmessage=function(e){postMessage(workFunction(e.data));}';
+
+	var blob = new Blob([source],{type:"text/javascript"});
+	var blobURL = URL.createObjectURL(blob);
+	var worker = new Worker(blobURL);
+	worker.onmessage = function(e){
+		callback(e.data);
+	};
+	worker.onerror = function(event) {
+		console.info(event.filename, event.lineno, event.message,[event,source]);
+	};
+	worker.postMessage(param);
+	worker.close = worker.terminate;
+	return worker;
+}
 
 /**
  * FunctionHooks;
@@ -1870,6 +2118,14 @@ var MaskView =  (function(){
  * alert.hook("alert",window,function(){console.log(arguments);});
  * kodApp.open.hook("open",kodApp,function(){});
  * String.prototype.slice.hook("slice",String.prototype,function(){});
+ * 
+ * 
+ * WebSocket.hook("WebSocket",window,{
+ * 		before:function(){
+ * 			arguments[0] && arguments[0] = arguments[0].replace("http","ws");
+ * 			return arguments;
+ * 		}
+ * });
  *
  * hookFunc支持hook前执行；hook后执行；  如果参数是函数则默认为hook前执行；如果为对象则分别配置hook前、hook后执行
  * {before:function,after:function} //
@@ -1920,16 +2176,40 @@ function FunctionHooks(){
 					return '';
 				}
 				try{
-					eval('_context[_funcName] = function '+_funcName+'(){\n'+
-						'var args = Array.prototype.slice.call(arguments,0);\n'+
-						'var obj = this;\n'+
-						'args = hookFuncBefore.apply(obj,args);\n'+
-						'if(args === "hookReturn"){return;}\n'+
-						'if(args === undefined){args = arguments;}\n'+
-						'var result = _context[_realFunc].apply(obj,args);\n'+
-						'if(hookFuncAfter){return hookFuncAfter.apply(result);}\n'+
-						'else{return result;}\n'+
-						'};');
+					eval(
+						'_context[_funcName] = function '+_funcName+'(){\
+							var args = Array.prototype.slice.call(arguments,0);\
+							var obj = this;\
+							args = hookFuncBefore.apply(obj,args);\
+							if(args === "hookReturn"){\
+								return;\
+							}\
+							if(args === undefined){\
+								args = arguments;\
+							}\
+							var result = false,func = _context[_realFunc];\
+							if( func.prototype && func.prototype.constructor &&\
+                                func.prototype.constructor.toString().indexOf("{ [native code] }") != -1 ){\
+								switch( args.length ){\
+									case 0:new func();break;\
+									case 1:new func(args[0]);break;\
+									case 2:new func(args[0],args[1]);break;\
+									case 3:new func(args[0],args[1],args[2]);break;\
+									case 4:new func(args[0],args[1],args[2],args[3]);break;\
+									case 5:new func(args[0],args[1],args[2],args[3],args[4]);break;\
+									case 6:new func(args[0],args[1],args[2],args[3],args[4],args[5]);break;\
+									default:new func(args[0],args[1],args[2],args[3],args[4],args[5],args[6]);break;\
+								}\
+							}else{\
+								result = func.apply(obj,args);\
+							}\
+							if(hookFuncAfter){\
+								return hookFuncAfter.apply(result);\
+							}else{\
+								return result;\
+							}\
+						};'
+					);
 					_context[_funcName].prototype.isHooked = true;
 					return true;
 				}catch (e){
@@ -1970,7 +2250,6 @@ var functionHooks = new FunctionHooks();
 functionHooks.initEnv();
 
 
-
 /**
  * iframe 兼容跨域通信组件
  * @description MessengerJS, a common cross-document communicate solution.
@@ -1982,107 +2261,124 @@ functionHooks.initEnv();
  * 
  */
 window.Messenger = (function(){
-    // 消息前缀, 建议使用自己的项目名, 避免多项目之间的冲突
-    var prefix = "[PROJECT_NAME]",
-        supportPostMessage = 'postMessage' in window;
+	// 消息前缀, 建议使用自己的项目名, 避免多项目之间的冲突
+	var prefix = "[PROJECT_NAME]",
+		supportPostMessage = 'postMessage' in window;
 
-    // Target 类, 消息对象
-    function Target(target, name){
-        var errMsg = '';
-        if(arguments.length < 2){
-            errMsg = 'target error - target and name are both requied';
-        } else if (typeof target != 'object'){
-            errMsg = 'target error - target itself must be window object';
-        } else if (typeof name != 'string'){
-            errMsg = 'target error - target name must be string type';
-        }
-        if(errMsg){
-            throw new Error(errMsg);
-        }
-        this.target = target;
-        this.name = name;
-    }
+	// Target 类, 消息对象
+	function Target(target, name){
+		var errMsg = '';
+		if(arguments.length < 2){
+			errMsg = 'target error - target and name are both requied';
+		} else if (typeof target != 'object'){
+			errMsg = 'target error - target itself must be window object';
+		} else if (typeof name != 'string'){
+			errMsg = 'target error - target name must be string type';
+		}
+		if(errMsg){
+			throw new Error(errMsg);
+		}
+		this.target = target;
+		this.name = name;
+	}
 
-    // 往 target 发送消息, 出于安全考虑, 发送消息会带上前缀
-    if ( supportPostMessage ){
-        // IE8+ 以及现代浏览器支持
-        Target.prototype.send = function(msg){
-            this.target.postMessage(prefix + msg, '*');
-        };
-    } else {
-        // 兼容IE 6/7
-        Target.prototype.send = function(msg){
-            var targetFunc = window.navigator[prefix + this.name];
-            if ( typeof targetFunc == 'function' ) {
-                targetFunc(prefix + msg, window);
-            } else {
-                throw new Error("target callback function is not defined");
-            }
-        };
-    }
+	// 往 target 发送消息, 出于安全考虑, 发送消息会带上前缀
+	if ( supportPostMessage ){
+		// IE8+ 以及现代浏览器支持
+		Target.prototype.send = function(msg){
+			this.target.postMessage(prefix + msg, '*');
+		};
+	} else {
+		// 兼容IE 6/7
+		Target.prototype.send = function(msg){
+			var targetFunc = window.navigator[prefix + this.name];
+			if ( typeof targetFunc == 'function' ) {
+				targetFunc(prefix + msg, window);
+			} else {
+				throw new Error("target callback function is not defined");
+			}
+		};
+	}
 
-    // 信使类
-    // 创建Messenger实例时指定, 必须指定Messenger的名字, (可选)指定项目名, 以避免Mashup类应用中的冲突
-    // !注意: 父子页面中projectName必须保持一致, 否则无法匹配
-    function Messenger(messengerName, projectName){
-        this.targets = {};
-        this.name = messengerName;
-        this.listenFunc = [];
-        prefix = projectName || prefix;
-        this.initListen();
-    }
+	// 信使类
+	// 创建Messenger实例时指定, 必须指定Messenger的名字, (可选)指定项目名, 以避免Mashup类应用中的冲突
+	// !注意: 父子页面中projectName必须保持一致, 否则无法匹配
+	function Messenger(messengerName, projectName){
+		this.targets = {};
+		this.name = messengerName;
+		this.listenFunc = [];
+		prefix = projectName || prefix;
+		this.initListen();
+	}
 
-    // 添加一个消息对象
-    Messenger.prototype.addTarget = function(target, name){
-        var targetObj = new Target(target, name);
-        this.targets[name] = targetObj;
-    };
+	// 添加一个消息对象
+	Messenger.prototype.addTarget = function(target, name){
+		var targetObj = new Target(target, name);
+		this.targets[name] = targetObj;
+	};
 
-    // 初始化消息监听
-    Messenger.prototype.initListen = function(){
-        var self = this;
-        var generalCallback = function(msg){
-            if(typeof msg == 'object' && msg.data){
-                msg = msg.data;
-            }
-            // 剥离消息前缀
-            msg = msg.slice(prefix.length);
-            for(var i = 0; i < self.listenFunc.length; i++){
-                self.listenFunc[i](msg);
-            }
-        };
-        if ( supportPostMessage ){
-            if ( 'addEventListener' in document ) {
-                window.addEventListener('message', generalCallback, false);
-            } else if ( 'attachEvent' in document ) {
-                window.attachEvent('onmessage', generalCallback);
-            }
-        } else {
-            // 兼容IE 6/7
-            window.navigator[prefix + this.name] = generalCallback;
-        }
-    };
-    // 监听消息
-    Messenger.prototype.listen = function(callback){
-        this.listenFunc.push(callback);
-    };
-    // 注销监听
-    Messenger.prototype.clear = function(){
-        this.listenFunc = [];
-    };
-    // 广播消息
-    Messenger.prototype.send = function(msg){
-        var targets = this.targets,
-            target;
-        for(target in targets){
-            if(targets.hasOwnProperty(target)){
-                targets[target].send(msg);
-            }
-        }
-    };
-    return Messenger;
+	// 初始化消息监听
+	Messenger.prototype.initListen = function(){
+		var self = this;
+		var generalCallback = function(msg){
+			if(typeof msg == 'object' && msg.data){
+				msg = msg.data;
+			}
+			// 剥离消息前缀
+			msg = msg.slice(prefix.length);
+			for(var i = 0; i < self.listenFunc.length; i++){
+				self.listenFunc[i](msg);
+			}
+		};
+		if ( supportPostMessage ){
+			if ( 'addEventListener' in document ) {
+				window.addEventListener('message', generalCallback, false);
+			} else if ( 'attachEvent' in document ) {
+				window.attachEvent('onmessage', generalCallback);
+			}
+		} else {
+			// 兼容IE 6/7
+			window.navigator[prefix + this.name] = generalCallback;
+		}
+	};
+	// 监听消息
+	Messenger.prototype.listen = function(callback){
+		this.listenFunc.push(callback);
+	};
+	// 注销监听
+	Messenger.prototype.clear = function(){
+		this.listenFunc = [];
+	};
+	// 广播消息
+	Messenger.prototype.send = function(msg){
+		var targets = this.targets,
+			target;
+		for(target in targets){
+			if(targets.hasOwnProperty(target)){
+				targets[target].send(msg);
+			}
+		}
+	};
+	return Messenger;
 })();
 
+var __json = function(obj){
+    var cache = [];
+    var result = JSON.stringify(obj, function(key, value) {
+        if (typeof value === 'object' && value !== null) {
+            if (cache.indexOf(value) !== -1) {
+                return;
+            }
+            cache.push(value);
+        }
+        if (typeof value === 'function') {
+            return '[function]';
+        }
+        return value;
+    });
+    cache = null;
+    return JSON.parse(result);
+}
 
 
 //yyyy-mm-dd H:i:s or yy-mm-dd  to timestamp
@@ -2111,6 +2407,9 @@ var strtotime = function(datetime){
 	return parseInt(now.getTime()/1000);   
 }
 var date = function(format, timestamp){
+	if(format == undefined) format = "Y-m-d H:i:s";
+	if(timestamp == undefined) timestamp = time();
+
 	timestamp = parseInt(timestamp);
 	var a, jsdate=((timestamp) ? new Date(timestamp*1000) : new Date());
 	var pad = function(n, c){
@@ -2460,9 +2759,13 @@ var Base64Server =  (function(){
 	// public method for decoding  
 	var decode = function (encodedData) {  
 		var decodeUTF8string = function (str) {
-		    return decodeURIComponent(str.split('').map(function (c) {
-		      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
-		    }).join(''));
+			try {
+				return decodeURIComponent(str.split('').map(function (c) {
+					return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+				}).join(''));
+			} catch (e) {
+				return str;
+			}
 		}
 		if (typeof window !== 'undefined') {
 			if (typeof window.atob !== 'undefined') {
@@ -2643,7 +2946,20 @@ var htmlEncode=function(str){
 	return s;
 }
 var htmlDecode=function(str){
-	var temp = document.createElement("div");
+	var s = "";
+	if(!str || str.length == 0) return "";
+	s = str.replace(/&amp;/g,"&");
+	s = s.replace(/&lt;/g,"<");
+	s = s.replace(/&gt;/g,">");
+	s = s.replace(/&nbsp;/g," ");
+	s = s.replace(/&#39;/g,"\'");
+	s = s.replace(/&quot;/g,"\"");
+	return s;
+	
+	//IE会丢失换行; 
+	if(!str) return str;
+	if(str.match(/[<& '">]/)) return str;//避免xss风
+	var temp = document.createElement("pre"); 
 	temp.innerHTML = str;
 	var output = temp.innerText || temp.textContent;
 	temp = null;

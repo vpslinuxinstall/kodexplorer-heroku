@@ -5,34 +5,31 @@
 </head>
 
 <body>
-	<?php
-		$arr = array(2,3,6,8,9,11,12);
-		$get = $arr[mt_rand(0,count($arr)-1)];
-		$image = STATIC_PATH."images/wall_page/".$get.".jpg";
-		echo '<style type="text/css">.aero:before,.aero:after,.background{background-image:url('.$image.')}</style>';
-	?>
+	<?php echo pageBackground();?>
 	<div class="background"></div>
-	<div class="init-loading"><div><img src="<?php echo STATIC_PATH;?>images/common/loading_simple.gif"/></div></div>
+	<div class="init-loading"><div><img src="<?php echo STATIC_PATH;?>images/common/loading_simple.gif?v=<?php echo KOD_VERSION;?>"/></div></div>
 	<div class="loginbox animated-500 fadeInDown aero" >
 		<div class="title">
 			<div class="logo"><i class="icon-cloud"></i><?php echo strip_tags(LNG('kod_name'));?></div>
-			<div class='info'>——<?php echo LNG('kod_name_desc');?></div>
+			<div class='info'><?php echo LNG('kod_name_desc');?></div>
+			<?php if(!isset($config['settings']['language'])){ ?>
 			<div class="menu-group">
 				<a id='footer-language' data-toggle="dropdown" href="javascript:void(0);" class="topbar-menu">
 					<i class='font-icon icon-flag'></i>Language<b class="caret"></b>
 				</a>
 				<ul class="dropdown-menu footer-language pull-left animated menuShow" role="menu" aria-labelledby="footer-language">
-				  	<?php 
-				  		$tpl = "";
-				  		foreach ($config['settingAll']['language'] as $key => $value) {
-				  			$name = $value[0];
-				  			$select = I18n::getType() == $key ? "this":"";
-				  			$tpl .= "<li><a href='javascript:core.language(\"{$key}\");' title=\"{$key}/{$value[1]}/{$value[2]}\" class='{$select}'><i class='lang-flag flag-{$key}'></i>{$name}</a></li>";
-				  		}
-						echo $tpl;
-					?>
+				<?php 
+					$tpl = "";
+					foreach ($config['settingAll']['language'] as $key => $value) {
+						$name = $value[0];
+						$select = I18n::getType() == $key ? "this":"";
+						$tpl .= "<li><a href='javascript:core.language(\"{$key}\");' title=\"{$key}/{$value[1]}/{$value[2]}\" class='{$select}'><i class='lang-flag flag-{$key}'></i>{$name}</a></li>";
+					}
+					echo $tpl;
+				?>
 				</ul>
 			</div>
+			<?php } ?>
 		</div>
 		<div class="form">
 			<form action="#">
@@ -46,11 +43,12 @@
 						<i class="font-icon  icon-key"></i>
 						<input id="password" name='password' type="password" placeholder="<?php echo LNG('password');?>" 
 						required  autocomplete="on" disabled/>
+						<input type='hidden' name='csrfLogin' value="<?php echo $_SESSION['csrfLogin'];?>"/>
 					</div>
 	            	<?php if(need_check_code()){?>
 					<div class='check-code'>
 						<i class="font-icon icon-unlock-alt"></i>
-						<input name='checkCode' class="check-code" type="text" placeholder="<?php echo LNG('login_code');?>" required autocomplete="off"/>
+						<input name='checkCode' class="check-code" type="text" placeholder="<?php echo LNG('login_code');?>" required/>
 						<img src='./index.php?user/checkCode' onclick="this.src='./index.php?user/checkCode'" />
 					</div>
 					<?php }?>
